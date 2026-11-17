@@ -33,7 +33,7 @@ public sealed class RemotePlayWindowStream : IStreamSession
     private const int BlackFramesBeforeWarning = FramesPerSecond * 4;
 
     private static readonly string[] SonyProcesses = ["RemotePlay"];
-    private static readonly string[] ChiakiProcesses = ["chiaki", "chiaki-ng"];
+    private static readonly string[] ChiakiProcesses = ["chiaki", "chiaki-ng", "veyra_qml_ui"];
 
     public event Action<Frame>? FrameReceived;
     public event Action<SessionState>? StateChanged;
