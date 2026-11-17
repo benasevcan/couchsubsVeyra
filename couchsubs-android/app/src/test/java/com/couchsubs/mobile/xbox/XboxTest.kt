@@ -446,14 +446,44 @@ class XboxSessionMachineTest {
         assertEquals(XboxError.TIMEOUT, (m.phase as XboxSessionMachine.Phase.Failed).kind)
     }
 
-    @Test fun failedStateRetriesAndClassifies() {
+    @Test fun failedStateDoesNotRetryAndClassifies() {
         val m = XboxSessionMachine()
         m.start(); m.played()
-        assertEquals(XboxSessionMachine.Action.Retry(5000), m.status("Failed", """{"code":"ServerInUse"}"""))
+        // Konsol yayını reddetti: yeniden denemek konsolu yeniden tetikler.
+        assertEquals(XboxSessionMachine.Action.Retry(null), m.status("Failed", """{"code":"ServerInUse"}"""))
         assertEquals(XboxError.BUSY, (m.phase as XboxSessionMachine.Phase.Failed).kind)
-        // Yeniden başlar.
-        assertEquals(XboxSessionMachine.Action.Play, m.start())
+        assertFalse((m.phase as XboxSessionMachine.Phase.Failed).willRetry)
         assertEquals(XboxError.CONSOLE_UNAVAILABLE, XboxSessionMachine.classifyFailure("""{"code":"ConsoleOffline"}"""))
+    }
+
+    @Test fun errorDetailsStopsRetrying() {
+        val m = XboxSessionMachine()
+        m.start(); m.played()
+        // Boş ayrıntı hata sayılmaz.
+        assertEquals(XboxSessionMachine.Action.PollState(1000), m.status("Provisioning", """{"code":null,"message":null}"""))
+        assertEquals(XboxSessionMachine.Action.Retry(null), m.status("Provisioning", """{"code":"Conflict","message":"x"}"""))
+    }
+
+    @Test fun retriesBackOffThenStop() {
+        val m = XboxSessionMachine()
+        assertEquals(XboxSessionMachine.Action.Retry(5000), m.fail(XboxError.NETWORK, "kopma"))
+        assertEquals(XboxSessionMachine.Action.Retry(15000), m.fail(XboxError.NETWORK, "kopma"))
+        assertEquals(XboxSessionMachine.Action.Retry(45000), m.fail(XboxError.NETWORK, "kopma"))
+        assertEquals(3, (m.phase as XboxSessionMachine.Phase.Failed).attempt)
+        assertEquals(XboxSessionMachine.Action.Retry(null), m.fail(XboxError.NETWORK, "kopma"))
+    }
+
+    @Test fun healthyStreamResetsRetries() {
+        var now = 1_000L
+        val m = XboxSessionMachine(clock = { now })
+        m.fail(XboxError.NETWORK, "kopma"); m.fail(XboxError.NETWORK, "kopma")
+        m.start(); m.played(); m.status("Provisioned", null); m.streaming()
+        now += 60_000
+        assertEquals(XboxSessionMachine.Action.Retry(5000), m.fail(XboxError.NETWORK, "kopma"))
+        // Kısa süren yayın sayacı sıfırlamaz.
+        m.start(); m.played(); m.status("Provisioned", null); m.streaming()
+        now += 1_000
+        assertEquals(XboxSessionMachine.Action.Retry(15000), m.fail(XboxError.NETWORK, "kopma"))
     }
 
     @Test fun signInErrorsDoNotRetry() {

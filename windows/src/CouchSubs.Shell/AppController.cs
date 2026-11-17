@@ -286,6 +286,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         SessionPhase.Streaming => text["Connected"],
         SessionPhase.Connecting => text["Connecting…"],
         _ when !isRunning => xboxConsole is null ? text["Not connected"] : text.Format("%@ is ready. It connects when you start translating.", xboxConsole.Name),
+        // Denemeler bitti ya da konsol yayını reddetti: oturum durdu, yeniden denenmiyor.
+        _ when sessionState.Reason is { Kind: DisconnectKind.Refused, Detail.Length: > 0 } stopped => stopped.Detail,
         _ when !string.IsNullOrWhiteSpace(sessionState.Reason?.Detail) => text.Format("Retrying the Xbox connection: %@", sessionState.Reason.Detail),
         _ => text["Retrying the Xbox connection…"],
     };
@@ -365,9 +367,10 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                 Changed(nameof(CanStart), nameof(Ps5StatusText), nameof(ConsoleTitle));
             var windowAppChanged = value.FrameSource == FrameSource.RemotePlayWindow && old.RemotePlayApp != value.RemotePlayApp;
             var captureWindowChanged = value.FrameSource == FrameSource.CaptureWindow && old.CaptureWindow != value.CaptureWindow;
-            if (isRunning && (old.FrameSource != value.FrameSource || windowAppChanged || captureWindowChanged))
+            var xboxFrameRateChanged = IsXbox && old.XboxLegacyFrameRate != value.XboxLegacyFrameRate;
+            if (isRunning && (old.FrameSource != value.FrameSource || windowAppChanged || captureWindowChanged || xboxFrameRateChanged))
             {
-                // Görüntü kaynağı (ya da okunan Remote Play uygulaması) değişti: çeviri yeni kaynakla yeniden başlar.
+                // Görüntü kaynağı ya da Xbox kare aralığı değişti: akış yeni seçimle yeniden başlar.
                 Stop();
                 _ = StartAsync().ContinueWith(task => RemotePlayLog.Note($"Çeviri yeniden başlatılamadı: {task.Exception?.GetBaseException().Message}"),
                                               TaskContinuationOptions.OnlyOnFaulted);
@@ -1273,7 +1276,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             if (IsXbox)
             {
                 RemotePlayLog.Note($"Çeviri başladı; {ConsoleTitle} bağlantısı açılıyor.");
-                stream = (services.Xbox ?? throw new InvalidOperationException(text["Xbox streaming isn't available in this version."])).MakeStream(xboxConsole!, xboxToken!);
+                stream = (services.Xbox ?? throw new InvalidOperationException(text["Xbox streaming isn't available in this version."])).MakeStream(xboxConsole!, xboxToken!, settings.XboxLegacyFrameRate);
                 xboxNameChecked = false;
             }
             else if (readsWindow)
@@ -1376,6 +1379,14 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     /// <summary>Pencerenin yeri ve genişliği ayarlanıyor: örnek yazı görünür, tıklamalar geçmez.</summary>
     public bool OverlayAdjusting { get => overlayAdjusting; set => Set(ref overlayAdjusting, value); }
+
+    private bool hotkeysPaused;
+
+    /// <summary>
+    /// Ayarlar'da yeni kısayol bekleniyor: genel kısayollar bırakılır, böylece basılan tuş (çeviri sürerken bile) işi
+    /// çalıştırmadan seçim kutusuna ulaşır.
+    /// </summary>
+    public bool HotkeysPaused { get => hotkeysPaused; set => Set(ref hotkeysPaused, value); }
 
     /// <summary>Num 7 ve ana ekrandaki seçenek: altyazı penceresinde tıklamaların geçmesini açar/kapatır.</summary>
     public void ToggleClickThrough() => Settings = settings with { OverlayClickThrough = !settings.OverlayClickThrough };

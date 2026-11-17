@@ -490,6 +490,30 @@ public class AppControllerTests
         Assert.Equal("Oturma Odası Xbox", store.Load<XboxConsole>(StoreKeys.XboxConsole)?.Name);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task XboxFrameRateSettingIsPassedToStreamAndPersisted(bool legacyFrameRate)
+    {
+        var store = new MemoryStore();
+        store.Save(StoreKeys.ConsoleKind, GameConsoleKind.Xbox);
+        store.Save(StoreKeys.XboxToken, "{}");
+        store.Save(StoreKeys.XboxConsole, new XboxConsole("F4", "Xbox", "XboxSeriesX", true));
+        var savedSettings = new MemorySettings();
+        savedSettings.Save(new UserSettings { Output = SubtitleOutput.Computer });
+        var xbox = new FakeXbox([]);
+        var controller = Make(new FakeServices { Xbox = xbox }, store, savedSettings);
+        try
+        {
+            Assert.False(controller.Settings.XboxLegacyFrameRate);
+            controller.Settings = controller.Settings with { XboxLegacyFrameRate = legacyFrameRate };
+            await controller.StartAsync();
+            Assert.Equal([legacyFrameRate], xbox.LegacyFrameRateRequests);
+            Assert.Equal(legacyFrameRate, savedSettings.Load().XboxLegacyFrameRate);
+        }
+        finally { controller.Dispose(); }
+    }
+
     [Fact]
     public async Task PairingTextIsTurkish()
     {
@@ -1784,10 +1808,15 @@ internal sealed class FakeDubbingModel(bool installed) : IDubbingModel
 
 internal sealed class FakeXbox(IReadOnlyList<XboxConsole> consoles) : IXboxService
 {
+    public List<bool> LegacyFrameRateRequests { get; } = [];
     public event Action<string>? TokenUpdated { add { } remove { } }
     public void Clear() { }
     public Task<XboxLoginChallenge> BeginLoginAsync() => throw new NotSupportedException();
     public Task<string> CompleteLoginAsync() => throw new NotSupportedException();
     public Task<IReadOnlyList<XboxConsole>> DiscoverAsync(string token) => Task.FromResult(consoles);
-    public IStreamSession MakeStream(XboxConsole console, string token) => new FakeStream();
+    public IStreamSession MakeStream(XboxConsole console, string token, bool legacyFrameRate)
+    {
+        LegacyFrameRateRequests.Add(legacyFrameRate);
+        return new FakeStream();
+    }
 }

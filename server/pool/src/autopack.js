@@ -41,7 +41,12 @@ const MAX_VARIANTS = 20;
 
 const STATE = "auto/state.json";
 const KNOWN = "auto/known-keys.bin";
-const cacheFile = (job) => (job.titleId ? `auto/tr/${job.titleId}.json` : `auto/tr/name-${gameSlug(job.gameKey)}.json`);
+const cacheFile = (job) => {
+  if (job.titleId) return `auto/tr/${job.titleId}.json`;
+  const key = String(job.gameKey);
+  const suffix = /^[a-z0-9 ]+$/.test(key) ? gameSlug(key) : jobPackId(job).slice(PACK_PREFIX.length);
+  return `auto/tr/name-${suffix}.json`;
+};
 
 // poolpack.py ile aynı: konuşmacı etiketi, Türkçe harf, yazı tanıma çöpü.
 const LABEL = /^[-•\s]*([A-Z][A-Za-z .'’-]{1,28}?)\s*[•:]\s+(?=\S)/;
@@ -82,7 +87,16 @@ export function packId(titleId) {
 
 /** İşin paket kimliği: oyun kimliği varsa ondan, yoksa adın anahtarından ("gta 6" → "pool-gta-6"). */
 export function jobPackId(job) {
-  return job.titleId ? packId(job.titleId) : prefixedPackId(gameSlug(job.gameKey), String(job.gameKey));
+  if (job.titleId) return packId(job.titleId);
+  const identity = String(job.gameKey);
+  const slug = gameSlug(identity);
+  if (/^[a-z0-9 ]+$/.test(identity)) return prefixedPackId(slug, identity);
+
+  // Non-Latin characters disappear from the ASCII slug, so hash the full key to avoid collisions.
+  const hash = hashPackSuffix(identity);
+  const maxSlug = MAX_PACK_ID_LENGTH - PACK_PREFIX.length - hash.length - 1;
+  const safeSlug = (slug || "game").slice(0, maxSlug).replace(/-+$/, "");
+  return `${PACK_PREFIX}${safeSlug}-${hash}`;
 }
 
 /** Kimliksiz satırların oyun adları ("game" sütunu, yazımına göre sayılmış) anahtara göre birleşir; en az MIN_VOTERS
@@ -91,7 +105,7 @@ export function nameJobs(rows, votes) {
   const groups = new Map();
   for (const r of rows) {
     const k = gameKey(r.game);
-    if (!k || !gameSlug(k) || gameSlug(k) === "genel") continue;
+    if (!k || gameSlug(k) === "genel") continue;
     const g = groups.get(k) ?? { titleId: null, gameKey: k, game: r.game, best: 0, lines: 0, games: [] };
     g.lines += r.lines;
     if (g.games.length < MAX_VARIANTS) g.games.push(r.game);
@@ -297,7 +311,16 @@ export async function runAutopack(env, now = new Date()) {
   if (!env.PACKS || !env.AI) return { phase: "disabled" };
   const night = now.toISOString().slice(0, 10);
   let state = await getJson(env, STATE);
-  if (state?.night !== night) {
+  // A parseable but incomplete R2 state must not stall every remaining run of this night.
+  // Replanning is safe: per-game translation caches are persisted separately.
+  const validJob = (job) => job && typeof job === "object" && !Array.isArray(job)
+    && ((typeof job.titleId === "string" && job.titleId.length > 0)
+      || (job.titleId == null && typeof job.gameKey === "string" && job.gameKey.length > 0));
+  const validState = state && Array.isArray(state.queue) && state.queue.every(validJob)
+    && Array.isArray(state.done) && Number.isSafeInteger(state.translated) && state.translated >= 0
+    && (state.namedGames == null || (Array.isArray(state.namedGames)
+      && state.namedGames.every((game) => typeof game === "string")));
+  if (state?.night !== night || !validState) {
     const { results } = await env.DB.prepare(
       "SELECT title_id, MAX(game) AS game, COUNT(*) AS lines FROM lines WHERE title_id IS NOT NULL AND installs>=? " +
       "GROUP BY title_id ORDER BY lines DESC LIMIT 50"

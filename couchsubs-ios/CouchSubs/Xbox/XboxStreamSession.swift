@@ -119,12 +119,16 @@ final class XboxStreamSession: NSObject, StreamControlling, @unchecked Sendable 
     private var stopped: Bool { locked { machine.phase == .stopped } }
 
     private func run() async {
+        log("konsol: \(console.name)")
         while !Task.isCancelled && !stopped {
             var action = locked { machine.start() }
+            // Makine `/state` yanıtında kendisi karar verdiyse (Failed, errorDetails) aynı hata yeniden sayılmaz.
+            var decided: XboxSessionMachine.Action?
             onState?(.connecting)
             do {
                 log("oturum açılıyor: \(console.name)")
                 let id = try await home.play(consoleId: console.id)
+                log("play yanıtı: oturum \(id.prefix(8))…")
                 locked { sessionId = id }
                 action = locked { machine.played() }
                 loop: while !Task.isCancelled {
@@ -133,15 +137,18 @@ final class XboxStreamSession: NSObject, StreamControlling, @unchecked Sendable 
                         if delay > 0 { try await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000) }
                         let status = try await home.state(id)
                         if status.state != "Provisioning" { log("durum: \(status.state)") }
+                        if let details = status.errorDetails { log("errorDetails: \(details)") }
                         action = locked { machine.status(status.state, errorDetails: status.errorDetails) }
                     case .connect:
                         try await home.connect(id)
+                        log("connect: başarılı")
                         action = locked { machine.connected() }
                     case .negotiate:
                         try await negotiate(id)
                         break loop
                     case .retry:
-                        if case let .failed(kind, message, _) = locked({ machine.phase }) { throw XboxError(kind, message) }
+                        decided = action
+                        if case let .failed(kind, message, _, _) = locked({ machine.phase }) { throw XboxError(kind, message) }
                         throw XboxError(.service, "Xbox")
                     case .play, .nothing:
                         break loop
@@ -150,7 +157,7 @@ final class XboxStreamSession: NSObject, StreamControlling, @unchecked Sendable 
                 if !Task.isCancelled && !stopped { throw XboxError(.network, locked { endReason } ?? "Xbox görüntü bağlantısı kapandı") }
             } catch is CancellationError {
             } catch let error as XboxError {
-                action = locked { machine.fail(error.kind, error.message) }
+                action = decided ?? locked { machine.fail(error.kind, error.message) }
                 report(error.kind, error.message)
             } catch {
                 action = locked { machine.fail(.service, error.localizedDescription) }
@@ -176,7 +183,17 @@ final class XboxStreamSession: NSObject, StreamControlling, @unchecked Sendable 
     private func report(_ kind: XboxErrorKind, _ detail: String) {
         locked { lastError = "\(kind.rawValue): \(detail)" }
         guard !stopped else { return }
-        log("hata (\(kind.rawValue)): \(detail)")
+        log("kopma (\(kind.rawValue)): \(detail)")
+        let (phase, delays) = locked { (machine.phase, machine.retryDelaysMs) }
+        if case let .failed(_, _, true, attempt) = phase, attempt > 0 {
+            log("yeniden deneme \(attempt)/\(delays.count): \(delays[attempt - 1] / 1000) sn sonra")
+        } else if case .failed = phase, !XboxSessionMachine.fatal.contains(kind) {
+            // Denemeler bitti ya da konsol yayını reddetti: yayın durur, yeniden denenmez.
+            log("yeniden denenmiyor, yayın durdu")
+            let reason = detail.trimmingCharacters(in: .whitespaces).isEmpty ? kind.rawValue : detail
+            onState?(.disconnected(.other(String(format: String(localized: "The Xbox connection was lost: %@. Restart the Xbox to reconnect."), reason))))
+            return
+        }
         onState?(.disconnected(.other(describe(kind))))
     }
 

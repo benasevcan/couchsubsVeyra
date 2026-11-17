@@ -9,6 +9,7 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.os.SystemClock
 import android.util.Log
+import com.couchsubs.mobile.R
 import com.couchsubs.mobile.account.Backend
 import com.couchsubs.mobile.remoteplay.DisconnectKind
 import com.couchsubs.mobile.remoteplay.FrameSource
@@ -121,12 +122,16 @@ class XboxStreamSession(
     }
 
     private fun run() {
+        log("konsol: ${console.name}")
         while (!stopped.get()) {
             var action: XboxSessionMachine.Action = machine.start()
+            // Makine `/state` yanıtında kendisi karar verdiyse (Failed, errorDetails) aynı hata yeniden sayılmaz.
+            var decided: XboxSessionMachine.Action? = null
             onState(SessionState.Connecting)
             try {
                 log("oturum açılıyor: ${console.name}")
                 sessionId = home.play(console.id)
+                log("play yanıtı: oturum ${sessionId?.take(8)}…")
                 action = machine.played()
                 loop@ while (!stopped.get()) {
                     when (val step = action) {
@@ -135,17 +140,22 @@ class XboxStreamSession(
                             val status = home.state(requireNotNull(sessionId))
                             action = machine.status(status.state, status.errorDetails)
                             if (status.state != "Provisioning") log("durum: ${status.state}")
+                            if (status.errorDetails != null) log("errorDetails: ${status.errorDetails}")
                         }
                         XboxSessionMachine.Action.Connect -> {
                             home.connect(requireNotNull(sessionId))
+                            log("connect: başarılı")
                             action = machine.connected()
                         }
                         XboxSessionMachine.Action.Negotiate -> {
                             negotiate(requireNotNull(sessionId))
                             break@loop
                         }
-                        is XboxSessionMachine.Action.Retry -> throw XboxException((machine.phase as? XboxSessionMachine.Phase.Failed)?.kind
-                            ?: XboxError.SERVICE, (machine.phase as? XboxSessionMachine.Phase.Failed)?.message ?: "Xbox")
+                        is XboxSessionMachine.Action.Retry -> {
+                            decided = step
+                            throw XboxException((machine.phase as? XboxSessionMachine.Phase.Failed)?.kind
+                                ?: XboxError.SERVICE, (machine.phase as? XboxSessionMachine.Phase.Failed)?.message ?: "Xbox")
+                        }
                         else -> break@loop
                     }
                 }
@@ -153,7 +163,7 @@ class XboxStreamSession(
             } catch (error: InterruptedException) {
                 if (stopped.get()) break
             } catch (error: XboxException) {
-                action = machine.fail(error.kind, error.message ?: "")
+                action = decided ?: machine.fail(error.kind, error.message ?: "")
                 report(error.kind, error.message)
             } catch (error: Exception) {
                 action = machine.fail(XboxError.SERVICE, error.message ?: error.javaClass.simpleName)
@@ -193,8 +203,22 @@ class XboxStreamSession(
     private fun report(kind: XboxError, detail: String?) {
         lastError = "$kind: $detail"
         if (stopped.get()) return
-        log("hata ($kind): $detail")
-        onState(SessionState.Disconnected(DisconnectKind.OTHER, describe(kind)))
+        log("kopma ($kind): $detail")
+        val failed = machine.phase as? XboxSessionMachine.Phase.Failed
+        when {
+            failed == null || failed.willRetry -> {
+                failed?.let { log("yeniden deneme ${it.attempt}/${machine.retryDelaysMs.size}: ${machine.retryDelaysMs[it.attempt - 1] / 1000} sn sonra") }
+                onState(SessionState.Disconnected(DisconnectKind.OTHER, describe(kind)))
+            }
+            // Giriş gerekiyor: kullanıcının yapacağı iş hizmetin metninde.
+            kind in XboxSessionMachine.FATAL -> onState(SessionState.Disconnected(DisconnectKind.OTHER, describe(kind)))
+            else -> {
+                // Denemeler bitti ya da konsol yayını reddetti: yayın durur, yeniden denenmez.
+                log("yeniden denenmiyor, yayın durdu")
+                onState(SessionState.Disconnected(DisconnectKind.OTHER,
+                    appContext.getString(R.string.xbox_connection_lost, detail?.takeIf { it.isNotBlank() } ?: kind.name)))
+            }
+        }
     }
 
     private fun stopRemote() {

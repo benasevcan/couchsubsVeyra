@@ -267,10 +267,17 @@ public sealed record UserSettings
     public AppAppearance Appearance { get; init; } = AppAppearance.Dark;
     /// <summary>Görüntü PS5 bağlantısından mı, bu bilgisayardaki Remote Play penceresinden mi okunur.</summary>
     public FrameSource FrameSource { get; init; } = FrameSource.Ps5;
+    /// <summary>Xbox karelerini #244 öncesindeki 200 ms aralıkla al; varsayılan 66 ms.</summary>
+    public bool XboxLegacyFrameRate { get; init; }
     /// <summary>OBS veya başka bir açık pencere seçildiyse yalnız bu pencere yakalanır (varsayılan null).</summary>
     public WindowCaptureTarget? CaptureWindow { get; init; }
     /// <summary>Pencereden okunurken hangi Remote Play uygulaması (bkz. <see cref="Shell.RemotePlayApp"/>).</summary>
     public RemotePlayApp RemotePlayApp { get; init; } = RemotePlayApp.Automatic;
+    /// <summary>
+    /// Kullanıcının değiştirdiği kısayollar (yalnız varsayılandan farklı olanlar; bkz. <see cref="HotkeyTable.Assign"/>).
+    /// Eski ayar dosyalarında yoktur; o zaman bütün kısayollar varsayılandır.
+    /// </summary>
+    public IReadOnlyList<HotkeyChoice> Hotkeys { get; init; } = [];
 
     /// <summary>Ayarlarda seçili motor: çevrimiçi çeviri kapalıysa ücretsiz olan.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
@@ -406,7 +413,7 @@ public interface IXboxService
     Task<XboxLoginChallenge> BeginLoginAsync();
     Task<string> CompleteLoginAsync();
     Task<IReadOnlyList<XboxConsole>> DiscoverAsync(string token);
-    IStreamSession MakeStream(XboxConsole console, string token);
+    IStreamSession MakeStream(XboxConsole console, string token, bool legacyFrameRate);
 }
 
 /// <summary>Cihaz üstü çeviri modeli: kurulu mu, indir, çevirmen oluştur.</summary>

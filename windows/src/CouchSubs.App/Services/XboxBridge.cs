@@ -165,8 +165,8 @@ public sealed class XboxService : IXboxService, IDisposable
             item.GetProperty("model").GetString() ?? "Xbox", item.GetProperty("streamingEnabled").GetBoolean())).ToArray();
     }
 
-    public CouchSubs.RemotePlay.IStreamSession MakeStream(XboxConsole console, string token) =>
-        new XboxStreamSession(bridge, console, token, refreshed => TokenUpdated?.Invoke(refreshed));
+    public CouchSubs.RemotePlay.IStreamSession MakeStream(XboxConsole console, string token, bool legacyFrameRate) =>
+        new XboxStreamSession(bridge, console, token, refreshed => TokenUpdated?.Invoke(refreshed), legacyFrameRate);
 
     public void Dispose() => bridge.Dispose();
 }

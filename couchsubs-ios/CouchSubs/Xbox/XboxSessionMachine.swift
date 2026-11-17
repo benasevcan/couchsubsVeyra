@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Ev yayını oturumunun durum makinesi ve veri kanalı iletileri (Android: XboxSessionMachine.kt, XboxChannels.kt).
 // Kurallar Windows'taki XboxStreamSession ile aynı; iletiler xbox-xcloud-player 0.2.11'inkilerle birebir (MIT, unknownskl).
+// Hata ya da kopmada 5, 15, 45 sn sonra baştan denenir; üç ardışık denemeden sonra durulur (konsol "oyun başka yerde
+// açıldı" deyip yayını kesince eskiden her 5 sn'de bir yeniden açılıyordu). Konsol `Failed` ya da `errorDetails` dönerse
+// hiç denenmez. Yayın `healthyStreamMs` ayakta kaldıysa deneme sayısı sıfırlanır.
 
 import Foundation
 
@@ -9,7 +12,8 @@ struct XboxSessionMachine {
         case idle, starting
         case provisioning(polls: Int, connectSent: Bool)
         case negotiating, streaming
-        case failed(XboxErrorKind, message: String, willRetry: Bool)
+        /// `attempt`: bu kopmadan sonraki ardışık deneme (1…3); denenmiyorsa 0.
+        case failed(XboxErrorKind, message: String, willRetry: Bool, attempt: Int = 0)
         case stopped
     }
 
@@ -27,13 +31,21 @@ struct XboxSessionMachine {
 
     let maxPolls: Int
     let pollIntervalMs: Int
-    let retryDelayMs: Int
+    let retryDelaysMs: [Int]
+    let healthyStreamMs: Int
+    private let clock: () -> Double
     private(set) var phase: Phase = .idle
+    /// Ardışık başarısız deneme sayısı.
+    private var failures = 0
+    private var streamingSince: Double = 0
 
-    init(maxPolls: Int = 90, pollIntervalMs: Int = 1000, retryDelayMs: Int = 5000) {
+    init(maxPolls: Int = 90, pollIntervalMs: Int = 1000, retryDelaysMs: [Int] = [5000, 15000, 45000], healthyStreamMs: Int = 60_000,
+         clock: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime * 1000 }) {
         self.maxPolls = maxPolls
         self.pollIntervalMs = pollIntervalMs
-        self.retryDelayMs = retryDelayMs
+        self.retryDelaysMs = retryDelaysMs
+        self.healthyStreamMs = healthyStreamMs
+        self.clock = clock
     }
 
     mutating func start() -> Action {
@@ -50,12 +62,14 @@ struct XboxSessionMachine {
 
     mutating func status(_ state: String, errorDetails: String?) -> Action {
         guard case let .provisioning(polls, connectSent) = phase else { return .nothing }
+        // Konsol yayını kendisi reddetti: yeniden denemek konsolu yeniden tetikler, denenmez.
+        if state == "Failed" || (state != "Provisioned" && Self.hasErrorDetails(errorDetails)) {
+            return fail(Self.classifyFailure(errorDetails), errorDetails ?? "Xbox yayını açılamadı", permanent: true)
+        }
         switch state {
         case "Provisioned":
             phase = .negotiating
             return .negotiate
-        case "Failed":
-            return fail(Self.classifyFailure(errorDetails), errorDetails ?? "Xbox yayını açılamadı")
         case "ReadyToConnect" where !connectSent:
             phase = .provisioning(polls: polls, connectSent: true)
             return .connect
@@ -79,14 +93,27 @@ struct XboxSessionMachine {
     mutating func streaming() -> Bool {
         guard phase == .negotiating else { return false }
         phase = .streaming
+        streamingSince = clock()
         return true
     }
 
-    mutating func fail(_ kind: XboxErrorKind, _ message: String) -> Action {
+    /// `permanent`: konsol yayını reddetti (`Failed` ya da `errorDetails`); yeniden denenmez.
+    mutating func fail(_ kind: XboxErrorKind, _ message: String, permanent: Bool = false) -> Action {
         guard phase != .stopped else { return .nothing }
-        let retry = !Self.fatal.contains(kind)
-        phase = .failed(kind, message: message, willRetry: retry)
-        return .retry(delayMs: retry ? retryDelayMs : nil)
+        // Yayın en az `healthyStreamMs` sürdüyse bu kopma yeni bir dizinin ilkidir.
+        if streamingSince > 0 && clock() - streamingSince >= Double(healthyStreamMs) { failures = 0 }
+        streamingSince = 0
+        failures += 1
+        let retry = !permanent && !Self.fatal.contains(kind) && failures <= retryDelaysMs.count
+        phase = .failed(kind, message: message, willRetry: retry, attempt: retry ? failures : 0)
+        return .retry(delayMs: retry ? retryDelaysMs[failures - 1] : nil)
+    }
+
+    /// `errorDetails` gerçek bir hata mı (boş nesne ya da tüm alanları null olan nesne sayılmaz).
+    static func hasErrorDetails(_ details: String?) -> Bool {
+        let text = (details ?? "").replacingOccurrences(of: " ", with: "")
+        if text.isEmpty || text == "{}" || text == "null" { return false }
+        return text.range(of: #"^\{("[^"]*":(null|""),?)*\}$"#, options: .regularExpression) == nil
     }
 
     mutating func stop() { phase = .stopped }

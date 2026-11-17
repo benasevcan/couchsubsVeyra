@@ -441,6 +441,7 @@
     <string name="xbox_error_timeout">Your Xbox didn\'t answer. Retrying…</string>
     <string name="xbox_error_network">The Xbox connection dropped. Reconnecting…</string>
     <string name="xbox_error_service">The Xbox service sent an unexpected reply. Retrying…</string>
+    <string name="xbox_connection_lost">The Xbox connection was lost: %1$s. Restart the Xbox to reconnect.</string>
     <string name="beta">Beta</string>
     <string name="platform_title">Your console</string>
     <string name="platform_body">Choose the console whose subtitles you want translated. You can change it later in Settings.</string>

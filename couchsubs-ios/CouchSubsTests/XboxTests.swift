@@ -287,12 +287,42 @@ final class XboxSessionMachineTests: XCTestCase {
         XCTAssertEqual(m.status("Provisioning", errorDetails: nil), .retry(delayMs: 5000))
         XCTAssertEqual(m.start(), .play)
         _ = m.played()
-        XCTAssertEqual(m.status("Failed", errorDetails: #"{"code":"ServerInUse"}"#), .retry(delayMs: 5000))
-        if case let .failed(kind, _, _) = m.phase { XCTAssertEqual(kind, .busy) } else { XCTFail() }
+        // Konsol yayını reddetti: yeniden denenmez.
+        XCTAssertEqual(m.status("Failed", errorDetails: #"{"code":"ServerInUse"}"#), .retry(delayMs: nil))
+        if case let .failed(kind, _, willRetry, _) = m.phase { XCTAssertEqual(kind, .busy); XCTFalse(willRetry) } else { XCTFail() }
         XCTAssertEqual(m.fail(.signInRequired, "giriş"), .retry(delayMs: nil))
         m.stop()
         XCTAssertEqual(m.start(), .nothing)
         XCTAssertEqual(m.fail(.network, "x"), .nothing)
+    }
+
+    func testErrorDetailsStopsRetrying() {
+        var m = XboxSessionMachine()
+        _ = m.start(); _ = m.played()
+        // Boş ayrıntı hata sayılmaz.
+        XCTAssertEqual(m.status("Provisioning", errorDetails: #"{"code":null,"message":null}"#), .pollState(delayMs: 1000))
+        XCTAssertEqual(m.status("Provisioning", errorDetails: #"{"code":"Conflict","message":"x"}"#), .retry(delayMs: nil))
+    }
+
+    func testRetriesBackOffThenStop() {
+        var m = XboxSessionMachine()
+        XCTAssertEqual(m.fail(.network, "kopma"), .retry(delayMs: 5000))
+        XCTAssertEqual(m.fail(.network, "kopma"), .retry(delayMs: 15000))
+        XCTAssertEqual(m.fail(.network, "kopma"), .retry(delayMs: 45000))
+        XCTAssertEqual(m.fail(.network, "kopma"), .retry(delayMs: nil))
+    }
+
+    func testHealthyStreamResetsRetries() {
+        let now = FakeClock()
+        var m = XboxSessionMachine(clock: { now.value })
+        _ = m.fail(.network, "kopma"); _ = m.fail(.network, "kopma")
+        _ = m.start(); _ = m.played(); _ = m.status("Provisioned", errorDetails: nil); _ = m.streaming()
+        now.value += 60_000
+        XCTAssertEqual(m.fail(.network, "kopma"), .retry(delayMs: 5000))
+        // Kısa süren yayın sayacı sıfırlamaz.
+        _ = m.start(); _ = m.played(); _ = m.status("Provisioned", errorDetails: nil); _ = m.streaming()
+        now.value += 1_000
+        XCTAssertEqual(m.fail(.network, "kopma"), .retry(delayMs: 15000))
     }
 
     func testOutOfOrderIgnored() {
@@ -307,6 +337,10 @@ private final class Counter: @unchecked Sendable {
     private let lock = NSLock()
     private var value = 0
     func next() -> Int { lock.lock(); defer { lock.unlock() }; value += 1; return value }
+}
+
+private final class FakeClock: @unchecked Sendable {
+    var value: Double = 1_000
 }
 
 private final class Box: @unchecked Sendable {

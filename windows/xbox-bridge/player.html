@@ -11,10 +11,10 @@
   let player;
   let frameTimer = 0;
   let lastFrame = 0;
-  // PS5 kareleri saniyede 20'ye kadar, telefonlardaki Xbox kareleri 66 ms'de bir okunur; burada 200 ms'ydi ve satır
-  // PS5'tekinden geç yakalanıyor, kısa duran satır kaçabiliyordu. Uygulama önceki kareyi bitirmeden yenisi gönderilmez:
+  // Varsayılan 66 ms kısa altyazıyı daha hızlı yakalar; Xbox ayarından #244 öncesindeki 200 ms'ye dönülebilir.
+  // Uygulama önceki kareyi bitirmeden yenisi gönderilmez:
   // kareler ileti kuyruğunda birikip eski kare okunmasın (en çok FRAME_WAIT_MS beklenir, yanıt kaybolursa akış durmasın).
-  const FRAME_MS = 66;
+  let frameMs = 66;
   const FRAME_WAIT_MS = 1000;
   let frameSentAt = 0;
   let frameWaiting = false;
@@ -31,7 +31,7 @@
   function capture(video) {
     if (!video || !video.videoWidth || !video.videoHeight) return;
     const now = performance.now();
-    if (now - lastFrame < FRAME_MS) return;
+    if (now - lastFrame < frameMs) return;
     if (frameWaiting && now - frameSentAt < FRAME_WAIT_MS) return;
     lastFrame = now;
     frameSentAt = now;
@@ -66,7 +66,7 @@
           video.muted = true;
           video.play().catch(fail);
           video.addEventListener('loadeddata', () => capture(video));
-          frameTimer = setInterval(() => capture(video), FRAME_MS);
+          frameTimer = setInterval(() => capture(video), frameMs);
           return true;
         };
         if (!attach()) {
@@ -113,7 +113,10 @@
       pending.delete(message.id);
       if (message.error) item.reject(new Error(message.error)); else item.resolve(message.value);
     } else if (message.kind === 'frameDone') frameWaiting = false;
-    else if (message.kind === 'start') start();
+    else if (message.kind === 'start') {
+      frameMs = message.legacyFrameRate ? 200 : 66;
+      start();
+    }
     else if (message.kind === 'stop') stop();
   });
   window.addEventListener('error', event => fail(event.error || event.message));

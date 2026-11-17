@@ -6,7 +6,7 @@
   'use strict';
 
   // TV uygulamasının sürümü: appinfo.json, tv-tizen/config.xml ve tv-android/app/build.gradle ile aynı tutulur.
-  var APP_VERSION = '0.9.21';
+  var APP_VERSION = '0.9.22';
   var t = window.t;
   var config = window.COUCHSUBS_CONFIG || {};
   var platform = window.COUCHSUBS_PLATFORM;
@@ -177,8 +177,10 @@
 
   function showNoPicture(port, failed) {
     if (noPictureClosed || pictureOk || demoRunning()) return;
+    // Neden ve ne yapılacağı düğmelerin üstünde; uzun "hâlâ siyah mı" açıklaması (index.html, #no-picture-help)
+    // düğmelerin altında, küçük ve ikincil renkte durur.
     $('no-picture-text').textContent = t(failed ? 'noPictureError' : 'noPicture').replace('%1', port) + ' ' +
-      t('noPictureChoose') + '\n\n' + t('noPictureStillBlack');
+      t('noPictureChoose');
     var box = $('no-picture-choices');
     box.innerHTML = '';
     var actions = [];
@@ -190,6 +192,8 @@
       button.className = 'button' + (actions[j].port === port ? ' current' : '');
       button.textContent = actions[j].label;
       button.addEventListener('click', choiceClick(actions[j], j));
+      // LG Magic Remote: işaretçinin üstünde durduğu düğme seçili olur; Tamam ve oklar oradan devam eder.
+      button.addEventListener('mouseover', choiceHover(j));
       actions[j].el = button;
       box.appendChild(button);
     }
@@ -211,6 +215,12 @@
     };
   }
 
+  function choiceHover(index) {
+    return function () {
+      if (index !== noPictureFocus) focusNoPicture(index);
+    };
+  }
+
   function focusNoPicture(index) {
     var count = noPictureActions.length;
     noPictureFocus = (index + count) % count;
@@ -218,6 +228,28 @@
       var el = noPictureActions[i].el;
       el.className = el.className.replace(' focused', '') + (i === noPictureFocus ? ' focused' : '');
     }
+  }
+
+  // ▲▼: düğmeler iki satıra bölünürse (uzun dil, dar ekran) bir üst/alt satırda yatayda en yakın düğmeye geçer.
+  // Tek satırda yerinde kalır (◀▶ zaten sırayla gezer).
+  function focusNoPictureRow(step) {
+    var current = noPictureActions[noPictureFocus].el;
+    var top = current.offsetTop;
+    var center = current.offsetLeft + current.offsetWidth / 2;
+    var best = -1, bestRow = 0, bestSide = 0;
+    for (var i = 0; i < noPictureActions.length; i++) {
+      var el = noPictureActions[i].el;
+      var row = (el.offsetTop - top) * step;
+      // Aynı satırdakiler (birkaç piksel fark dahil) ve ters yöndekiler atlanır.
+      if (row <= 2) continue;
+      var side = Math.abs(el.offsetLeft + el.offsetWidth / 2 - center);
+      if (best < 0 || row < bestRow - 2 || (Math.abs(row - bestRow) <= 2 && side < bestSide)) {
+        best = i;
+        bestRow = row;
+        bestSide = side;
+      }
+    }
+    if (best >= 0) focusNoPicture(best);
   }
 
   function runNoPicture(action) {
@@ -612,10 +644,15 @@
 
   // Konum hem CouchSubs uygulamasından hem kumandanın oklarıyla ayarlanır. Kumandayla
   // seçilen konum, uygulamadaki ayar değişene kadar korunur (son değiştiren geçerlidir).
+  // Alttan en az %3: ekran kenarı taşan (overscan) TV'lerde altyazının alt satırı kesilmesin.
+  var BOTTOM_MIN_PERCENT = 3;
+
   function setBottom(percent) {
-    bottomPercent = Math.max(0, Math.min(85, percent));
+    bottomPercent = Math.max(BOTTOM_MIN_PERCENT, Math.min(85, percent));
     layout();
   }
+
+  var SIDE_MIN = 0.05;
 
   // Altyazıyı seçilen yerleşime göre konumlar. İngilizce altyazının yeri bilinmiyorsa sabit yükseklik kullanılır.
   function layout() {
@@ -638,11 +675,11 @@
     if (mode === 'below' && box.bottom > 0.88) mode = 'above';
     if (mode === 'above' && box.top < 0.12) mode = 'below';
 
-    // Yatayda İngilizce satırın ortasına hizalanır.
+    // Yatayda İngilizce satırın ortasına hizalanır; yanlarda güvenli alan (1920'de 96 piksel, %5) kadar boşluk kalır.
     var center = (box.left + box.right) / 2;
     var half = Math.max(0.3, Math.min(center, 1 - center));
-    el.style.left = (Math.max(0.02, center - half) * 100) + '%';
-    el.style.right = (Math.max(0.02, 1 - center - half) * 100) + '%';
+    el.style.left = (Math.max(SIDE_MIN, center - half) * 100) + '%';
+    el.style.right = (Math.max(SIDE_MIN, 1 - center - half) * 100) + '%';
 
     if (mode === 'cover') {
       // İngilizce yazı koyu bir zeminle örtülür, çeviri onun ortasına gelir.
@@ -716,6 +753,15 @@
   var coverBackground = '';
   var bandShape = false;
 
+  // body'deki tek bir sınıfı açar ya da kapatır; diğerleri kalır. Eskiden className baştan yazılıyordu ve Android TV
+  // katmanının 'overlay' sınıfı ilk style olayında siliniyordu.
+  function setBodyClass(name, on) {
+    var body = document.body;
+    if (!body) return;
+    var rest = (' ' + body.className + ' ').replace(' ' + name + ' ', ' ');
+    body.className = (on ? rest + name : rest).replace(/^\s+|\s+$/g, '').replace(/\s+/g, ' ');
+  }
+
   // Bilgisayardaki "Yazı rengi" seçimi; bilinmeyen değer gelirse renk değişmez.
   var TEXT_COLORS = { white: '#FFFFFF', yellow: '#FFE135' };
 
@@ -730,9 +776,11 @@
     }
     if (PLACEMENTS[style.placement]) placement = style.placement;
     bandShape = style.backgroundShape === 'band';
-    document.body.className = bandShape ? 'band' : '';
+    setBodyClass('band', bandShape);
     if (typeof style.background === 'number') {
       var alpha = Math.max(0, Math.min(100, style.background)) / 100;
+      // Zemin çok saydamsa yazıya sert kontur eklenir (style.css, body.thin-bg).
+      setBodyClass('thin-bg', alpha < 0.3);
       textBackground = 'rgba(0, 0, 0, ' + alpha + ')';
       coverBackground = style.background >= 100 ? '#000' : textBackground;
       $('subtitle-text').style.background = textBackground;
@@ -1125,10 +1173,24 @@
     return match ? match[1] : null;
   }
 
+  // Bekleme ekranındaki durum satırı: TV'nin adresi (biliniyorsa; telefonda elle yazılabilir) ve aramanın sürdüğü.
+  // Adres ayrıca sorulmaz, taramanın zaten sorduğu adres kullanılır.
+  var tvAddress = null;
+
+  function renderWaitingStatus() {
+    var el = $('waiting-status');
+    if (!el) return;
+    el.textContent = (tvAddress ? t('waitingAddress').replace('%1', tvAddress) + ' · ' : '') + t('waitingSearching');
+  }
+
   // Taranacak ağlar: TV'nin kendi ağı, sonra kayıtlı adresin ağı (aynıysa bir kez).
   function scanSubnets(done) {
     var fromServer = subnetOf(server);
     function finish(ip) {
+      if (ip && ip !== tvAddress) {
+        tvAddress = ip;
+        renderWaitingStatus();
+      }
       var list = [];
       var own = subnetOf(ip);
       if (own) list.push(own);
@@ -1373,8 +1435,11 @@
     if (code === KEY.OK) lastOkKey = Date.now();
     if (code === KEY.OK && sourceTipShown()) {
       hideSourceTip();
-    } else if (noPictureShown() && (code === KEY.LEFT || code === KEY.RIGHT || code === KEY.UP || code === KEY.DOWN)) {
-      focusNoPicture(noPictureFocus + (code === KEY.RIGHT || code === KEY.DOWN ? 1 : -1));
+    } else if (noPictureShown() && (code === KEY.LEFT || code === KEY.RIGHT)) {
+      focusNoPicture(noPictureFocus + (code === KEY.RIGHT ? 1 : -1));
+      e.preventDefault();
+    } else if (noPictureShown() && (code === KEY.UP || code === KEY.DOWN)) {
+      focusNoPictureRow(code === KEY.DOWN ? 1 : -1);
       e.preventDefault();
     } else if (noPictureShown() && code === KEY.OK) {
       runNoPicture(noPictureActions[noPictureFocus]);
@@ -1423,6 +1488,7 @@
 
   $('app-version').textContent = APP_VERSION;
   renderDiag();
+  renderWaitingStatus();
   // Önceki açılışta TV kendiliğinden kaynağa geçtiyse ipucu şimdi gösterilir.
   maybeShowSourceTip();
   var initial = parseParams(platform.launchParams());
