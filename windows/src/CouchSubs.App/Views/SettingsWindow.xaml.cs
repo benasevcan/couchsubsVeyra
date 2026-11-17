@@ -45,7 +45,17 @@ public partial class SettingsWindow : Window
         MisreadWait.Value = settings.MisreadWaitMs / 1000.0;
         PartialWait.Value = settings.PartialWaitMs / 1000.0;
         ShowWaits();
-        TextColor.SelectedItem = TextColor.Items.Cast<ComboBoxItem>().First(item => (string)item.Tag == settings.Style.TextColor.ToString());
+        TextColor.SelectedItem = TextColor.Items.Cast<ComboBoxItem>().FirstOrDefault(item => (string)item.Tag == settings.Style.TextColor.ToString())
+            ?? TextColor.Items[0];
+        CustomTextColor.Text = string.IsNullOrWhiteSpace(settings.Style.CustomTextColor) ? "#FFFFFF" : settings.Style.CustomTextColor;
+        UpdateCustomColorPreview(settings.Style.TextColor, CustomTextColor.Text);
+        var fontName = string.IsNullOrWhiteSpace(settings.Style.FontFamily) ? "Segoe UI" : settings.Style.FontFamily;
+        FontFamilyChoice.SelectedItem = FontFamilyChoice.Items.Cast<ComboBoxItem>().FirstOrDefault(item => string.Equals((string)item.Tag, fontName, StringComparison.OrdinalIgnoreCase))
+            ?? FontFamilyChoice.Items[0];
+        ShadowStrengthChoice.SelectedItem = ShadowStrengthChoice.Items.Cast<ComboBoxItem>().FirstOrDefault(item => (string)item.Tag == settings.Style.ShadowStrength.ToString())
+            ?? ShadowStrengthChoice.Items[0];
+        BackgroundColorChoice.SelectedItem = BackgroundColorChoice.Items.Cast<ComboBoxItem>().FirstOrDefault(item => (string)item.Tag == settings.Style.BackgroundColor.ToString())
+            ?? BackgroundColorChoice.Items[0];
         DisplayMode.SelectedItem = DisplayMode.Items.Cast<ComboBoxItem>().First(item => (string)item.Tag == settings.Style.DisplayMode.ToString());
         // Yalnız çeviri modeli olan diller listelenir; tek dil varsa seçim gösterilmez.
         foreach (var (code, name) in Languages.Where(l => controller.SupportsLanguage(l.Code)))
@@ -692,7 +702,54 @@ public partial class SettingsWindow : Window
     private void OnTextColor(object sender, SelectionChangedEventArgs e)
     {
         if (TextColor.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
-        Update(s => s with { Style = s.Style with { TextColor = Enum.Parse<SubtitleTextColor>(tag) } });
+        var color = Enum.Parse<SubtitleTextColor>(tag);
+        UpdateCustomColorPreview(color, CustomTextColor.Text);
+        Update(s => s with { Style = s.Style with { TextColor = color } });
+    }
+
+    private void OnCustomTextColor(object sender, TextChangedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        var raw = CustomTextColor.Text.Trim();
+        UpdateCustomColorPreview(controller.Settings.Style.TextColor, raw);
+        var normalized = raw.StartsWith('#') ? raw : "#" + raw;
+        try
+        {
+            if (System.Windows.Media.ColorConverter.ConvertFromString(normalized) is System.Windows.Media.Color)
+                Update(s => s with { Style = s.Style with { CustomTextColor = normalized } });
+        }
+        catch (FormatException) { }
+    }
+
+    private void UpdateCustomColorPreview(SubtitleTextColor color, string hex)
+    {
+        CustomColorPanel.Visibility = color == SubtitleTextColor.Custom ? Visibility.Visible : Visibility.Collapsed;
+        var normalized = hex.Trim();
+        if (!normalized.StartsWith('#')) normalized = "#" + normalized;
+        try
+        {
+            if (System.Windows.Media.ColorConverter.ConvertFromString(normalized) is System.Windows.Media.Color parsed)
+                CustomColorPreview.Background = new System.Windows.Media.SolidColorBrush(parsed);
+        }
+        catch (FormatException) { }
+    }
+
+    private void OnFontFamily(object sender, SelectionChangedEventArgs e)
+    {
+        if (FontFamilyChoice.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
+        Update(s => s with { Style = s.Style with { FontFamily = tag } });
+    }
+
+    private void OnShadowStrength(object sender, SelectionChangedEventArgs e)
+    {
+        if (ShadowStrengthChoice.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
+        Update(s => s with { Style = s.Style with { ShadowStrength = Enum.Parse<SubtitleShadowStrength>(tag) } });
+    }
+
+    private void OnBackgroundColor(object sender, SelectionChangedEventArgs e)
+    {
+        if (BackgroundColorChoice.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
+        Update(s => s with { Style = s.Style with { BackgroundColor = Enum.Parse<SubtitleBackgroundColor>(tag) } });
     }
 
     private void OnDisplayMode(object sender, SelectionChangedEventArgs e)

@@ -51,7 +51,11 @@ public sealed record SubtitleStyle(
     SubtitleTextColor TextColor = SubtitleTextColor.White,
     TvDisplayMode DisplayMode = TvDisplayMode.InApp,
     bool StackPrevious = true,
-    SubtitleBackgroundShape BackgroundShape = SubtitleBackgroundShape.Fit);
+    SubtitleBackgroundShape BackgroundShape = SubtitleBackgroundShape.Fit,
+    string CustomTextColor = "#FFFFFF",
+    string FontFamily = "Segoe UI",
+    SubtitleShadowStrength ShadowStrength = SubtitleShadowStrength.Normal,
+    SubtitleBackgroundColor BackgroundColor = SubtitleBackgroundColor.Black);
 
 /// <summary>
 /// Android TV'de PS5 görüntüsünün nasıl gösterildiği. Yalnız Android TV uygulaması kullanır; diğer TV'ler ve OBS
@@ -72,6 +76,31 @@ public enum SubtitleTextColor
 {
     White,
     Yellow,
+    Cyan,
+    Green,
+    Orange,
+    Pink,
+    LightBlue,
+    Custom,
+}
+
+/// <summary>Altyazı arka plan kutusunun rengi.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<SubtitleBackgroundColor>))]
+public enum SubtitleBackgroundColor
+{
+    Black,
+    DarkGray,
+    Navy,
+}
+
+/// <summary>Altyazı metninin gölge / dış kenarlık gücü.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<SubtitleShadowStrength>))]
+public enum SubtitleShadowStrength
+{
+    Normal,
+    Strong,
+    Outline,
+    None,
 }
 
 /// <summary>Altyazıları TV'ye ileten taraf (gerçekte <see cref="SubtitleServer"/>).</summary>

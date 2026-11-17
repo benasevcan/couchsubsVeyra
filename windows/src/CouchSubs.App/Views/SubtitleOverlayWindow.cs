@@ -262,17 +262,18 @@ public sealed partial class SubtitleOverlayWindow : Window
         var text = new TextBlock
         {
             Text = wrapped.Text,
+            FontFamily = ResolveFontFamily(style.FontFamily),
             FontSize = size,
             FontWeight = style.Bold ? FontWeights.Bold : FontWeights.SemiBold,
-            Foreground = style.TextColor == SubtitleTextColor.Yellow ? new SolidColorBrush(Color.FromRgb(0xFF, 0xE1, 0x35)) : Brushes.White,
+            Foreground = ResolveTextBrush(style),
             TextWrapping = TextWrapping.Wrap,
             TextAlignment = line.Paragraphs ? TextAlignment.Left : TextAlignment.Center,
             LineHeight = size * 1.3,
-            Effect = new DropShadowEffect { Color = Colors.Black, ShadowDepth = 2 * scale, BlurRadius = 4 * scale, Opacity = 1, Direction = 270 },
+            Effect = ResolveShadowEffect(style.ShadowStrength, scale),
         };
         return new Border
         {
-            Background = new SolidColorBrush(Color.FromArgb((byte)Math.Round(alpha * 255), 0, 0, 0)),
+            Background = new SolidColorBrush(ResolveBackgroundColor(style.BackgroundColor, (byte)Math.Round(alpha * 255))),
             CornerRadius = new CornerRadius(band ? 0 : 10 * scale),
             Padding = current ? new Thickness(26 * scale, 10 * scale, 26 * scale, 10 * scale) : new Thickness(20 * scale, 6 * scale, 20 * scale, 6 * scale),
             Margin = new Thickness(band ? -24 * scale : 0, 14 * scale, band ? -24 * scale : 0, 0),
@@ -291,7 +292,7 @@ public sealed partial class SubtitleOverlayWindow : Window
         var middle = area is { } box ? (box.Left + box.Right) / 2 : 0.5;
         return new Border
         {
-            Background = new SolidColorBrush(Color.FromArgb(0xD9, 0, 0, 0)),
+            Background = new SolidColorBrush(ResolveBackgroundColor(style.BackgroundColor, 0xD9)),
             CornerRadius = new CornerRadius(8 * scale),
             Padding = new Thickness(14 * scale, 6 * scale, 14 * scale, 6 * scale),
             Margin = new Thickness(0, 0, 0, 10 * scale),
@@ -299,14 +300,62 @@ public sealed partial class SubtitleOverlayWindow : Window
             Child = new TextBlock
             {
                 Text = text,
+                FontFamily = ResolveFontFamily(style.FontFamily),
                 FontSize = size,
                 FontWeight = FontWeights.SemiBold,
-                Foreground = style.TextColor == SubtitleTextColor.Yellow ? new SolidColorBrush(Color.FromRgb(0xFF, 0xE1, 0x35)) : Brushes.White,
+                Foreground = ResolveTextBrush(style),
                 TextWrapping = TextWrapping.Wrap,
                 LineHeight = size * 1.25,
+                Effect = ResolveShadowEffect(style.ShadowStrength, scale),
             },
         };
     }
+
+    private static FontFamily ResolveFontFamily(string? name) =>
+        new(string.IsNullOrWhiteSpace(name) ? "Segoe UI" : name);
+
+    private static Brush ResolveTextBrush(SubtitleStyle style) => style.TextColor switch
+    {
+        SubtitleTextColor.Yellow => new SolidColorBrush(Color.FromRgb(0xFF, 0xE1, 0x35)),
+        SubtitleTextColor.Cyan => new SolidColorBrush(Color.FromRgb(0x22, 0xD3, 0xEE)),
+        SubtitleTextColor.Green => new SolidColorBrush(Color.FromRgb(0x4A, 0xDE, 0x80)),
+        SubtitleTextColor.Orange => new SolidColorBrush(Color.FromRgb(0xFB, 0x92, 0x3C)),
+        SubtitleTextColor.Pink => new SolidColorBrush(Color.FromRgb(0xF4, 0x72, 0xB6)),
+        SubtitleTextColor.LightBlue => new SolidColorBrush(Color.FromRgb(0x93, 0xC5, 0xFD)),
+        SubtitleTextColor.Custom => ParseCustomBrush(style.CustomTextColor),
+        _ => Brushes.White,
+    };
+
+    private static Brush ParseCustomBrush(string? hex)
+    {
+        if (!string.IsNullOrWhiteSpace(hex))
+        {
+            var normalized = hex.Trim();
+            if (!normalized.StartsWith('#')) normalized = "#" + normalized;
+            try
+            {
+                if (ColorConverter.ConvertFromString(normalized) is Color parsed)
+                    return new SolidColorBrush(parsed);
+            }
+            catch (FormatException) { }
+        }
+        return Brushes.White;
+    }
+
+    private static Color ResolveBackgroundColor(SubtitleBackgroundColor color, byte alpha) => color switch
+    {
+        SubtitleBackgroundColor.DarkGray => Color.FromArgb(alpha, 0x1E, 0x20, 0x24),
+        SubtitleBackgroundColor.Navy => Color.FromArgb(alpha, 0x0F, 0x17, 0x2A),
+        _ => Color.FromArgb(alpha, 0x00, 0x00, 0x00),
+    };
+
+    private static DropShadowEffect? ResolveShadowEffect(SubtitleShadowStrength strength, double scale) => strength switch
+    {
+        SubtitleShadowStrength.None => null,
+        SubtitleShadowStrength.Strong => new DropShadowEffect { Color = Colors.Black, ShadowDepth = 3 * scale, BlurRadius = 8 * scale, Opacity = 1, Direction = 270 },
+        SubtitleShadowStrength.Outline => new DropShadowEffect { Color = Colors.Black, ShadowDepth = 0, BlurRadius = 3.5 * scale, Opacity = 1, Direction = 0 },
+        _ => new DropShadowEffect { Color = Colors.Black, ShadowDepth = 2 * scale, BlurRadius = 4 * scale, Opacity = 1, Direction = 270 },
+    };
 
     /// <summary>Yeri ayarlanırken: kesik çizgili çerçeve, açıklama, "Bitti" ve iki yandan genişletme tutamakları.</summary>
     private void BuildAdjustLayer()

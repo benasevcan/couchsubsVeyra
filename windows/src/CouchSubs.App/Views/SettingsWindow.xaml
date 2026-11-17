@@ -98,9 +98,44 @@
                             <TextBlock Style="{StaticResource HintText}" Margin="0,0,0,16"
                                        Text="{t:T 'When off, each new line replaces the previous one. Needs TV app 0.9.16 or later.'}" />
                             <TextBlock Text="{t:T 'Text color'}" Margin="0,0,0,8" />
-                            <ComboBox x:Name="TextColor" SelectionChanged="OnTextColor" Margin="0,0,0,16">
+                            <ComboBox x:Name="TextColor" SelectionChanged="OnTextColor" Margin="0,0,0,12">
                                 <ComboBoxItem Content="{t:T 'White'}" Tag="White" />
                                 <ComboBoxItem Content="{t:T 'Yellow'}" Tag="Yellow" />
+                                <ComboBoxItem Content="Camgöbeği (Cyan)" Tag="Cyan" />
+                                <ComboBoxItem Content="Yeşil" Tag="Green" />
+                                <ComboBoxItem Content="Turuncu" Tag="Orange" />
+                                <ComboBoxItem Content="Pembe" Tag="Pink" />
+                                <ComboBoxItem Content="Açık Mavi" Tag="LightBlue" />
+                                <ComboBoxItem Content="Özel (Hex)" Tag="Custom" />
+                            </ComboBox>
+                            <StackPanel x:Name="CustomColorPanel" Visibility="Collapsed" Orientation="Horizontal" Margin="0,0,0,16">
+                                <Border x:Name="CustomColorPreview" Width="28" Height="28" CornerRadius="6" BorderThickness="1"
+                                        BorderBrush="{DynamicResource borderBrush}" Background="#FFFFFF" Margin="0,0,10,0" VerticalAlignment="Center" />
+                                <TextBox x:Name="CustomTextColor" Width="120" MaxLength="9" TextChanged="OnCustomTextColor"
+                                         VerticalContentAlignment="Center" ToolTip="#RRGGBB (ör. #00FFAA)" />
+                            </StackPanel>
+                            <TextBlock Text="Yazı tipi (Font)" Margin="0,0,0,8" />
+                            <ComboBox x:Name="FontFamilyChoice" SelectionChanged="OnFontFamily" Margin="0,0,0,16">
+                                <ComboBoxItem Content="Segoe UI (Varsayılan)" Tag="Segoe UI" />
+                                <ComboBoxItem Content="Arial" Tag="Arial" />
+                                <ComboBoxItem Content="Tahoma" Tag="Tahoma" />
+                                <ComboBoxItem Content="Verdana" Tag="Verdana" />
+                                <ComboBoxItem Content="Trebuchet MS" Tag="Trebuchet MS" />
+                                <ComboBoxItem Content="Georgia" Tag="Georgia" />
+                                <ComboBoxItem Content="Consolas" Tag="Consolas" />
+                            </ComboBox>
+                            <TextBlock Text="Gölge / Dış kenarlık" Margin="0,0,0,8" />
+                            <ComboBox x:Name="ShadowStrengthChoice" SelectionChanged="OnShadowStrength" Margin="0,0,0,16">
+                                <ComboBoxItem Content="Normal" Tag="Normal" />
+                                <ComboBoxItem Content="Güçlü gölge" Tag="Strong" />
+                                <ComboBoxItem Content="Dış kenarlık (Outline)" Tag="Outline" />
+                                <ComboBoxItem Content="Kapalı" Tag="None" />
+                            </ComboBox>
+                            <TextBlock Text="Arka plan rengi" Margin="0,0,0,8" />
+                            <ComboBox x:Name="BackgroundColorChoice" SelectionChanged="OnBackgroundColor" Margin="0,0,0,16">
+                                <ComboBoxItem Content="Siyah (Varsayılan)" Tag="Black" />
+                                <ComboBoxItem Content="Koyu Gri" Tag="DarkGray" />
+                                <ComboBoxItem Content="Lacivert" Tag="Navy" />
                             </ComboBox>
                             <!-- Yalnız Android TV: bazı TV'lerde (ör. TCL) uygulama içindeki PS5 görüntüsü siyah kalıyor. -->
                             <StackPanel x:Name="DisplayModePanel" Visibility="Collapsed">
