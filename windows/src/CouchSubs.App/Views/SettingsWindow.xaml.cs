@@ -598,7 +598,7 @@ public partial class SettingsWindow : Window
         Process.Start(new ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true });
 
     public static void Open(Window? owner, AppController controller) =>
-        new SettingsWindow(controller) { Owner = owner }.ShowDialog();
+        OwnedWindow.Show(owner, () => new SettingsWindow(controller));
 
     private void Update(Func<UserSettings, UserSettings> change)
     {

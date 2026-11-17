@@ -18,7 +18,7 @@ public partial class AboutWindow : Window
         Version.Text = AppVersion.Current(Assembly.GetEntryAssembly() ?? typeof(AboutWindow).Assembly);
     }
 
-    public static void Open(Window? owner) => new AboutWindow { Owner = owner }.ShowDialog();
+    public static void Open(Window? owner) => OwnedWindow.Show(owner, () => new AboutWindow());
 
     private void OnLink(object sender, RequestNavigateEventArgs e) =>
         Process.Start(new ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true });
