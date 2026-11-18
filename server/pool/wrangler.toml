@@ -9,6 +9,8 @@ database_name = "couchsubs-pool"
 database_id = "c134a041-8f51-4a29-8195-9c6929e7e529"
 
 # ADMIN_TOKEN is a secret: set it with `wrangler secret put ADMIN_TOKEN`, never commit it.
+# APP_KEYS (secret, isteğe bağlı): üçüncü taraf uygulamaların X-CouchSubs-App-Key anahtarları,
+#   {"<anahtar>": {"name": "gametranslator", "daily": 20000}}; `wrangler secret put APP_KEYS` ile verilir.
 
 # Havuzdan kendiliğinden paket (src/autopack.js): yazılan kova paket sunucusunun (server/packs) okuduğu kovadır.
 [[r2_buckets]]

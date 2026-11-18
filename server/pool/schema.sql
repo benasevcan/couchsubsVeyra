@@ -3,6 +3,10 @@
 --
 -- D1 ücretsiz planda günde 100.000 satır yazma: tablo satırı ve her dizin girdisi ayrı sayılır. Bu yüzden iki büyük
 -- tablo WITHOUT ROWID (birincil anahtar = tablo, ek dizin yazması yok) ve gereksiz dizin yok.
+-- Yerel D1'de ölçülen rows_written (2026-11-18): rowid'li sightings'e yeni görülme 2, WITHOUT ROWID'e 1; rowid'li ve
+-- iki dizinli lines'a ekleme 4, installs güncellemesi 3, WITHOUT ROWID'de ikisi de 1. Değişiklik yapmayan
+-- INSERT OR IGNORE, koşulu tutmayan UPSERT ve CAS'ı tutmayan kota güncellemesi 0. Kod (src/index.js) ayrıca
+-- installs>=SATURATED ya da exported=1 satırın yeni görülmesini yazmaz ve kotayı her istekte değil QUOTA_BLOCK'ta bir yazar.
 
 -- Havuz: yalnız en az iki farklı kurulumun gördüğü satırlar. Tek kurulumun gördüğü satır yalnız sightings'te durur;
 -- ikinci kurulum gelince buraya installs=2 ile girer (src/index.js UPSERT).

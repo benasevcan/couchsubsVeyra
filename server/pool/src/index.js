@@ -4,6 +4,7 @@
 //                    PS5'te o an çalışan oyunun kimliği (titleId, ör. "PPSA01234") ve adı (game) gelir. Kimlik
 //                    yoksa ad uygulamanın paketten tanıdığı ya da kullanıcının seçtiği oyundur; kurulum başına bir
 //                    "oy" (game_votes) yazılır, gece paketi en az iki kurulumun bildirdiği adla açılır.
+//                    Üçüncü taraf uygulamalar X-CouchSubs-App-Key başlığıyla gönderir (APP_KEYS, aşağıda).
 // GET  /v1/export  : (yönetici) en az N kurulumun gördüğü, henüz çevrilmemiş satırlar; `title=` ya da `game=` ile
 //                    yalnız bir oyunun satırları.
 // POST /v1/exported: (yönetici) çeviriye alınan anahtarları işaretler.
@@ -76,37 +77,182 @@ export function submitSummary(body, lines) {
   };
 }
 
+// Kota (kurulum başına günde DAILY_LIMIT satır) D1'de tutulur, ama her istekte yazılmaz: dağıtım (isolate) D1'den
+// QUOTA_BLOCK satırlık bir pay ayırır ve sonraki istekleri bellekten karşılar. D1 sayacı yine DAILY_LIMIT'i aşamaz
+// (aynı CAS); bir dağıtımın kullanılmadan kalan payı en çok QUOTA_BLOCK olduğundan sınır biraz erken dolabilir,
+// hiçbir zaman geç değil. Kurulumlar günde ortalama ~35 satır gönderdiği için çoğu kurulum günde bir kota yazımı yapar.
+export const QUOTA_BLOCK = 200;
+const MAX_QUOTA_ENTRIES = 20000;
+// D1 nesnesine bağlı: her veritabanının (testlerde her sahte DB'nin) kendi payı olur.
+const quotaCache = new WeakMap();
+
+function quotaMap(env) {
+  let map = quotaCache.get(env.DB);
+  if (!map) quotaCache.set(env.DB, (map = new Map()));
+  return map;
+}
+
+/** İstek için yer ayırır: { room } ya da { status: 429 | 503 }. `install` kurulum kimliği ya da uygulamanın
+ *  toplam sayacı ("app:<ad>"); quota tablosu ikisini de tutar (şema değişmez). */
+async function reserveQuota(env, install, day, wanted, limit = DAILY_LIMIT) {
+  const map = quotaMap(env);
+  const id = `${install}|${day}`;
+  const local = map.get(id) ?? 0;
+  if (local >= wanted) {
+    map.set(id, local - wanted);
+    return { room: wanted };
+  }
+  const need = wanted - local;
+  for (let attempt = 0; attempt < QUOTA_CAS_ATTEMPTS; attempt++) {
+    const q = await env.DB.prepare("SELECT count FROM quota WHERE install=? AND day=?").bind(install, day).first();
+    const used = q?.count || 0;
+    const left = limit - used;
+    if (left <= 0) {
+      // D1 doldu; bu dağıtımda kalan pay varsa onu ver.
+      if (local > 0 || (map.get(id) ?? 0) > 0) return { room: take(map, id, wanted) };
+      return { status: 429 };
+    }
+    const grab = Math.min(left, Math.max(need, QUOTA_BLOCK));
+    const result = await env.DB.prepare(
+      "INSERT INTO quota(install,day,count) VALUES(?,?,?) " +
+      "ON CONFLICT(install,day) DO UPDATE SET count=count+excluded.count WHERE quota.count=?"
+    ).bind(install, day, grab, used).run();
+    if (result.meta?.changes > 0) {
+      if (map.size >= MAX_QUOTA_ENTRIES) map.clear();
+      map.set(id, (map.get(id) ?? 0) + grab);
+      return { room: take(map, id, wanted) };
+    }
+  }
+  return { status: 503 };
+}
+
+/** Ayrılmış ama kullanılmayan yer bu dağıtımın payına geri döner (D1'e yazılmaz). */
+function giveBack(env, install, day, n) {
+  if (n <= 0) return;
+  const map = quotaMap(env);
+  const id = `${install}|${day}`;
+  map.set(id, (map.get(id) ?? 0) + n);
+}
+
+function take(map, id, wanted) {
+  const have = map.get(id) ?? 0;
+  const room = Math.min(have, wanted);
+  map.set(id, have - room);
+  return room;
+}
+
+/** Yazım başarısız olunca: bu dağıtımın payı ve isteğin yeri D1'e geri verilir (nadir yol). Geri verme de başarısız
+ *  olursa kota tutucu kalır. */
+async function releaseQuota(env, install, day, room) {
+  const map = quotaMap(env);
+  const id = `${install}|${day}`;
+  const back = room + (map.get(id) ?? 0);
+  map.delete(id);
+  if (back > 0) {
+    await env.DB.prepare("UPDATE quota SET count=count-? WHERE install=? AND day=? AND count>=?")
+      .bind(back, install, day, back).run().catch(() => {});
+  }
+}
+
+// Bu kadar kurulumun gördüğü satır doğrulanmış sayılır (paket eşiği autopack MIN_INSTALLS = 2); yeni görülmesi yazılmaz.
+export const SATURATED = 3;
+// D1 bir sorguda en çok 100 bağlı değişken kabul eder.
+const IN_CHUNK = 90;
+
+/** Havuzda installs>=SATURATED olan ya da çeviriye alınmış anahtarlar (yalnız okuma). */
+async function settledKeys(env, keys) {
+  const settled = new Set();
+  for (let i = 0; i < keys.length; i += IN_CHUNK) {
+    const part = keys.slice(i, i + IN_CHUNK);
+    const { results } = await env.DB.prepare(
+      `SELECT key FROM lines WHERE key IN (${part.map(() => "?").join(",")}) AND (installs>=? OR exported=1)`
+    ).bind(...part, SATURATED).all();
+    for (const r of results ?? []) settled.add(r.key);
+  }
+  return settled;
+}
+
+// Üçüncü taraf uygulamalar havuza `X-CouchSubs-App-Key` başlığıyla katılır. Anahtarlar Worker secret'ında:
+//   APP_KEYS = {"<anahtar>": {"name": "gametranslator", "daily": 20000}}
+// Secret yoksa ya da bozuksa hiçbir anahtar geçerli değildir. Kendi istemcilerimiz anahtar göndermez; gövdedeki `app`
+// alanı onları tanıtır: Mac/iOS/Windows sürüm numarası ("0.1.0", "0.1.0-beta.46"), Android "CouchSubs Android 1.2.3".
+// `app` sahte gönderilebilir: bu bir düzen kuralıdır, kötüye kullanıma karşı asıl sınır kurulum ve uygulama kotalarıdır.
+export const APP_HEADER = "x-couchsubs-app-key";
+export const APP_DAILY_DEFAULT = 20000;
+const OWN_APP = /^(?:CouchSubs(?: [\p{L}\p{N} ._+-]{0,60})?|\d{1,4}(?:\.\d{1,4}){0,3}(?:[-+][0-9A-Za-z.+-]{1,40})?)$/u;
+const APP_NAME = /^[a-z0-9][a-z0-9._-]{0,39}$/;
+
+/** Gövdedeki `app` bizim istemcilerimizden biri mi. */
+export function ownApp(value) {
+  return typeof value === "string" && OWN_APP.test(value.trim());
+}
+
+let appKeysCache = { raw: undefined, keys: new Map() };
+
+/** APP_KEYS secret'ı: anahtar -> { name, daily }. Geçersiz kayıtlar atlanır. */
+export function appKeys(env) {
+  const raw = env.APP_KEYS;
+  if (raw === appKeysCache.raw) return appKeysCache.keys;
+  const keys = new Map();
+  try {
+    const parsed = typeof raw === "string" && raw ? JSON.parse(raw) : raw && typeof raw === "object" ? raw : {};
+    for (const [k, v] of Object.entries(parsed ?? {})) {
+      const name = String(v?.name ?? "").trim().toLowerCase();
+      const daily = Number(v?.daily ?? APP_DAILY_DEFAULT);
+      if (k.length < 16 || !APP_NAME.test(name) || !Number.isSafeInteger(daily) || daily < 1) continue;
+      keys.set(k, { name, daily });
+    }
+  } catch {
+    console.error(JSON.stringify({ error: "app_keys_invalid" }));
+  }
+  appKeysCache = { raw, keys };
+  return keys;
+}
+
+/** İsteği gönderen uygulama: { name, daily } (üçüncü taraf), { own: true } ya da { status, error }. */
+export function clientOf(req, body, env) {
+  const key = req.headers.get(APP_HEADER);
+  if (key != null && key !== "") {
+    const app = appKeys(env).get(key.trim());
+    return app ?? { status: 403, error: "app_key_invalid" };
+  }
+  if (ownApp(body?.app)) return { own: true };
+  return { status: 403, error: "app_key_required" };
+}
+
+function untilMidnight() {
+  const now = new Date();
+  const midnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+  return Math.max(60, Math.ceil((midnight - now.getTime()) / 1000));
+}
+
 async function submit(req, env) {
   let body;
   try { body = await req.json(); } catch { return json({ error: "json" }, 400); }
   const install = String(body?.install || "");
   if (!UUID.test(install) || !Array.isArray(body?.lines)) return json({ error: "bad_request" }, 400);
+  const client = clientOf(req, body, env);
+  if (client.status) return json({ error: client.error }, client.status);
   const lines = body.lines.slice(0, MAX_LINES);
   const day = new Date().toISOString().slice(0, 10);
 
-  // Reserve capacity with compare-and-swap. The previous read-then-batch increment let concurrent
-  // requests both spend the same remaining quota. Retry if another request changed the count first.
-  let room;
-  let reserved = false;
-  for (let attempt = 0; attempt < QUOTA_CAS_ATTEMPTS; attempt++) {
-    const q = await env.DB.prepare("SELECT count FROM quota WHERE install=? AND day=?").bind(install, day).first();
-    const used = q?.count || 0;
-    if (used >= DAILY_LIMIT) return json({ error: "quota" }, 429, { "retry-after": "3600" });
-    room = Math.min(lines.length, DAILY_LIMIT - used);
-    if (room === 0) {
-      reserved = true;
-      break;
-    }
-    const result = await env.DB.prepare(
-      "INSERT INTO quota(install,day,count) VALUES(?,?,?) " +
-      "ON CONFLICT(install,day) DO UPDATE SET count=count+excluded.count WHERE quota.count=?"
-    ).bind(install, day, room, used).run();
-    if (result.meta?.changes > 0) {
-      reserved = true;
-      break;
-    }
+  // Üçüncü taraf uygulamanın günlük toplamı (kurulum sınırına ek); aynı pay düzeniyle az yazımla sayılır.
+  const appId = client.name ? `app:${client.name}` : null;
+  let appRoom = lines.length;
+  if (appId) {
+    const app = await reserveQuota(env, appId, day, lines.length, client.daily);
+    if (app.status === 429) return json({ error: "app_quota" }, 429, { "retry-after": String(untilMidnight()) });
+    if (app.status) return json({ error: "busy" }, app.status, { "retry-after": "1" });
+    appRoom = app.room;
   }
-  if (!reserved) return json({ error: "busy" }, 503, { "retry-after": "1" });
+  const quota = await reserveQuota(env, install, day, appRoom);
+  if (quota.status) {
+    if (appId) giveBack(env, appId, day, appRoom);
+    return json({ error: quota.status === 429 ? "quota" : "busy" }, quota.status,
+      { "retry-after": quota.status === 429 ? "3600" : "1" });
+  }
+  const room = quota.room;
+  if (appId) giveBack(env, appId, day, appRoom - room);
 
   const fresh = new Map();
   let entries = [];
@@ -124,31 +270,36 @@ async function submit(req, env) {
       if (!fresh.has(k)) fresh.set(k, { text, title: titleId(l?.titleId), game: gameName(l?.game) });
     }
     // Günlükte (wrangler tail) yalnız sayılar ve oyun kimliğinin biçimi: oyun bilgisinin gelip gelmediği görülsün.
-    console.log(JSON.stringify(submitSummary(body, lines)));
+    console.log(JSON.stringify({ ...submitSummary(body, lines), client: client.name ?? "couchsubs" }));
 
     // Günlük D1 yazma kotası için: kurulumun görülme kaydı (sightings) ile en az iki kurulumun gördüğü
     // satırın havuza eklenmesi (lines) aynı transaction içinde gerçekleşir. Tek kurulumda upsert etkisizdir;
     // aynı kurulum tekrar gönderince de idempotent upsert hiçbir satırı değiştirmez.
     const now = new Date().toISOString();
     entries = [...fresh];
+    // Havuzda zaten SATURATED kurulumla doğrulanmış ya da çeviriye alınmış satırın yeni görülmesi hiçbir şeyi
+    // değiştirmez (paket eşiği 2); görülme (2 satır yazımı) ve installs güncellemesi (3 satır yazımı) atlanır.
+    // Toplu okuma ucuzdur ve yazım kotasına girmez.
+    const settled = await settledKeys(env, entries.map(([k]) => k));
+    const pending = entries.filter(([k]) => !settled.has(k));
     // Görülme ve satır güncellemesini tek D1 batch transaction'ında yap: ikinci adım hata
     // verirse yalnız sightings yazılı kalmamalı (yoksa tekrar göndermek satırı kalıcı olarak kaybettirir).
     // UPSERT, distinct sightings sayısına göre idempotenttir; aynı kurulum tekrar gönderince sayıyı artırmaz.
+    // Değişiklik yapmayan INSERT OR IGNORE ve koşulu tutmayan UPSERT D1'de rows_written'a girmez (yerel D1'de
+    // ölçüldü), bu yüzden aynı kurulumun yinelenen gönderimi zaten yazım harcamaz.
     const writes = [
-      ...entries.map(([k]) =>
+      ...pending.map(([k]) =>
         env.DB.prepare("INSERT OR IGNORE INTO sightings(key,install) VALUES(?,?)").bind(k, install)),
-      ...entries.map(([k, line]) =>
+      ...pending.map(([k, line]) =>
         env.DB.prepare(UPSERT).bind(k, line.text, now, now, line.title, line.game, k)),
     ];
     const results = writes.length ? await env.DB.batch(writes) : [];
-    recorded = results.slice(0, entries.length).filter((r) => r?.meta?.changes > 0).length;
+    recorded = results.slice(0, pending.length).filter((r) => r?.meta?.changes > 0).length;
   } catch (error) {
     // Undo the reservation if filtering, hashing, or the atomic write batch fails. A failed compensation
     // leaves quota conservative rather than risking an over-limit counter.
-    if (room > 0) {
-      await env.DB.prepare("UPDATE quota SET count=count-? WHERE install=? AND day=? AND count>=?")
-        .bind(room, install, day, room).run().catch(() => {});
-    }
+    await releaseQuota(env, install, day, room);
+    if (appId) await releaseQuota(env, appId, day, room);
     throw error;
   }
   await vote(env, install, entries);
@@ -246,6 +397,18 @@ async function stats(env) {
   return json(statsCache.body);
 }
 
+// D1'in geçici hataları ve günlük sınırları: istemci sonra yeniden göndersin (503 + Retry-After). Günlük satır
+// yazma/okuma sınırı UTC gece yarısı sıfırlanır; ötekiler kısa sürer.
+const D1_LIMIT = /exceed|limit|quota/i;
+const D1_TRANSIENT = /SQLITE_BUSY|overloaded|unavailable|timed? ?out|reset|network connection lost|internal error/i;
+
+/** D1 hatası geçiciyse Retry-After saniyesi, değilse 0. */
+export function unavailableFor(error) {
+  const message = String(error?.message || error);
+  if (D1_LIMIT.test(message)) return Math.min(3600, untilMidnight());
+  return D1_TRANSIENT.test(message) ? 60 : 0;
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
@@ -262,6 +425,10 @@ export default {
       if (url.pathname === "/") return new Response("CouchSubs subtitle pool\n");
       return json({ error: "not_found" }, 404);
     } catch (e) {
+      const message = String(e?.message || e);
+      console.error(JSON.stringify({ error: "server_error", path: url.pathname, message: message.slice(0, 500) }));
+      const wait = unavailableFor(e);
+      if (wait) return json({ error: "unavailable" }, 503, { "retry-after": String(wait) });
       return json({ error: "server_error" }, 500);
     }
   },

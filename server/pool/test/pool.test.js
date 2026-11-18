@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { accepts } from "../src/filter.js";
-import worker, { gameName, titleId } from "../src/index.js";
+import worker, { gameName, titleId, unavailableFor, ownApp, QUOTA_BLOCK, SATURATED } from "../src/index.js";
 import { GENERAL, jobPackId, nameJobs, runAutopack } from "../src/autopack.js";
 import { gameKey, gameSlug } from "../src/games.js";
 
@@ -39,6 +39,14 @@ function fakeDB() {
   const quotaKey = (install, day) => `${install}\u001f${day}`;
   const run = (sql, args) => {
     if (sql.startsWith("SELECT count FROM quota")) return { count: db.quotas.get(quotaKey(args[0], args[1])) ?? 0 };
+    if (sql.startsWith("SELECT key FROM lines WHERE key IN")) {
+      db.reads = (db.reads ?? 0) + 1;
+      const min = args[args.length - 1];
+      return { results: args.slice(0, -1).filter((k) => {
+        const row = lines.get(k);
+        return row && (row.installs >= min || row.exported === 1);
+      }).map((key) => ({ key })) };
+    }
     if (sql.startsWith("SELECT")) {
       db.last = { sql, args };
       return { results: [] };
@@ -65,6 +73,7 @@ function fakeDB() {
       return { meta: { changes: 1 } };
     }
     if (sql.startsWith("INSERT INTO quota")) {
+      db.quotaWrites = (db.quotaWrites ?? 0) + 1;
       const key = quotaKey(args[0], args[1]);
       const delta = args[2];
       const expected = args[3];
@@ -109,7 +118,7 @@ function fakeDB() {
 const install = (n) => `00000000-0000-4000-8000-00000000000${n}`;
 const post = (env, who, texts) => worker.fetch(new Request("https://pool.test/v1/lines", {
   method: "POST",
-  body: JSON.stringify({ install: who, lines: texts.map((text) => ({ text })) }),
+  body: JSON.stringify({ install: who, app: "0.1.0-beta.46", lines: texts.map((text) => ({ text })) }),
 }), env);
 
 test("gönderim süzer; tek kurulumun satırı havuza yazılmaz, ikinci kurulumda girer", async () => {
@@ -123,7 +132,8 @@ test("gönderim süzer; tek kurulumun satırı havuza yazılmaz, ikinci kurulumd
   // Aynı kurulum aynı satırları yeniden gönderirse yalnız görülme denemesi ve kota yazılır.
   DB.writes = 0;
   await post(env, install(1), ["Get down!", "Who is that over there?"]);
-  assert.equal(DB.writes, 5); // 2 idempotent sightings + 2 idempotent conditional UPSERT + 1 quota
+  // 2 idempotent sightings + 2 idempotent conditional UPSERT; kota bu dağıtımın ayırdığı paydan düşer (D1'e yazılmaz).
+  assert.equal(DB.writes, 4);
   assert.equal(DB.lines.size, 0);
 
   // İkinci kurulum: satır havuza installs=2 ile girer; yalnız onun okuduğu satır.
@@ -137,8 +147,78 @@ test("gönderim süzer; tek kurulumun satırı havuza yazılmaz, ikinci kurulumd
 
 const postLines = (env, who, lines) => worker.fetch(new Request("https://pool.test/v1/lines", {
   method: "POST",
-  body: JSON.stringify({ install: who, lines }),
+  body: JSON.stringify({ install: who, app: "CouchSubs Android 0.9.23", lines }),
 }), env);
+
+test("yeterince kurulumun doğruladığı ya da çeviriye alınmış satırın yeni görülmesi D1'e yazılmaz", async () => {
+  const DB = fakeDB();
+  const env = { DB };
+  for (let n = 1; n <= SATURATED; n++) await post(env, install(n), ["Get down!"]);
+  assert.deepEqual([...DB.lines.values()].map((l) => l.installs), [SATURATED]);
+
+  DB.writes = 0;
+  const reply = await post(env, install(SATURATED + 1), ["Get down!"]);
+  assert.deepEqual(await reply.json(), { accepted: 1, recorded: 0 });
+  assert.equal(DB.writes, 1, "yalnız yeni kurulumun günlük kota payı yazılır");
+  assert.deepEqual([...DB.lines.values()].map((l) => l.installs), [SATURATED]);
+
+  // Çeviriye alınmış (exported) satır da installs eşiğinin altındayken atlanır; doğrulanmamış satır yazılır.
+  DB.lines.set("x", { text: "x", installs: 2, exported: 1 });
+  const before = DB.writes;
+  await post(env, install(SATURATED + 1), ["Who is that over there?"]);
+  assert.equal(DB.writes - before, 2, "doğrulanmamış satır: görülme + koşullu UPSERT");
+});
+
+test("kota her istekte değil, pay bitince yazılır; günlük sınır yine aşılmaz", async () => {
+  const DB = fakeDB();
+  const env = { DB };
+  const who = install(5);
+  const day = new Date().toISOString().slice(0, 10);
+  const batch = (i) => Array.from({ length: 10 }, (_, j) => ({ text: `Keep moving ${i} ${j} now.` }));
+  for (let i = 0; i < 20; i++) assert.equal((await postLines(env, who, batch(i))).status, 200);
+  // 20 istek × 10 satır = 200 satır: tek pay, tek kota yazımı.
+  assert.equal(DB.quotaWrites, 1);
+  assert.equal(DB.quotas.get(`${who}\u001f${day}`), QUOTA_BLOCK);
+
+  // Sınıra yakın: kalan yer kadar kabul edilir, sonra 429.
+  DB.quotas.set(`${who}\u001f${day}`, 4995);
+  const many = Array.from({ length: 200 }, (_, j) => ({ text: `Hold the line ${j} please.` }));
+  const near = await postLines(env, who, many);
+  assert.equal(near.status, 200);
+  assert.equal(DB.quotas.get(`${who}\u001f${day}`), 5000);
+  let accepted = (await near.json()).accepted;
+  for (let i = 0; i < 5; i++) {
+    const r = await postLines(env, who, many);
+    if (r.status === 200) accepted += (await r.json()).accepted;
+    else assert.equal(r.status, 429);
+  }
+  assert.equal(DB.quotas.get(`${who}\u001f${day}`), 5000);
+  assert.ok(accepted <= 5, `en çok 5 yer kalmıştı, ${accepted} kabul edildi`);
+});
+
+test("D1 günlük yazım sınırı ya da geçici hatası 500 değil 503 + Retry-After döner ve günlüğe yazılır", async () => {
+  const DB = fakeDB();
+  DB.prepare = () => ({ bind: () => ({
+    first: async () => { throw new Error("D1_ERROR: Exceeded maximum daily rows written limit"); },
+    run: async () => { throw new Error("x"); },
+  }) });
+  const logged = [];
+  const original = console.error;
+  console.error = (...args) => logged.push(args.join(" "));
+  try {
+    const reply = await postLines({ DB }, install(1), [{ text: "Get down!" }]);
+    assert.equal(reply.status, 503);
+    const wait = Number(reply.headers.get("retry-after"));
+    assert.ok(wait >= 60 && wait <= 3600, String(wait));
+    assert.equal(logged.length, 1);
+    assert.match(logged[0], /Exceeded maximum daily rows written/);
+  } finally {
+    console.error = original;
+  }
+  assert.equal(unavailableFor(new Error("D1 DB is overloaded. Requests queued for too long.")), 60);
+  assert.equal(unavailableFor(new Error("Network connection lost.")), 60);
+  assert.equal(unavailableFor(new Error("injected batch failure")), 0);
+});
 
 test("eşzamanlı gönderimler günlük kota sınırını aşamaz", async () => {
   const DB = fakeDB();
@@ -498,4 +578,74 @@ test("admin export rejects explicitly invalid game filters instead of exporting 
   }), env);
   assert.equal(normal.status, 200);
   assert.match(DB.last.sql, /title_id=\?/);
+});
+
+const APP_KEY = "gt-0123456789abcdef";
+const postApp = (env, who, lines, { app = "GameTranslator 1.6.6", key } = {}) =>
+  worker.fetch(new Request("https://pool.test/v1/lines", {
+    method: "POST",
+    headers: key ? { "X-CouchSubs-App-Key": key } : {},
+    body: JSON.stringify({ install: who, app, lines }),
+  }), env);
+
+test("kendi istemcilerimizin app alanı tanınır, başkası tanınmaz", () => {
+  for (const app of ["0.1.0", "0.1.0-beta.46", "1.2.3", "CouchSubs Android 0.9.23", "CouchSubs Android 1.0.0-beta.42"]) {
+    assert.equal(ownApp(app), true, app);
+  }
+  for (const app of ["GameTranslator 1.6.6", "", "couchsubs", "CouchSubsX 1.0", undefined, 7]) {
+    assert.equal(ownApp(app), false, String(app));
+  }
+});
+
+test("anahtarsız üçüncü taraf uygulama 403 alır ve hiçbir şey yazılmaz", async () => {
+  const DB = fakeDB();
+  for (const env of [{ DB }, { DB, APP_KEYS: "bozuk json" }]) {
+    const reply = await postApp(env, install(1), [{ text: "Get down!" }]);
+    assert.equal(reply.status, 403);
+    assert.deepEqual(await reply.json(), { error: "app_key_required" });
+  }
+  const wrong = await postApp({ DB, APP_KEYS: JSON.stringify({ [APP_KEY]: { name: "gametranslator" } }) },
+    install(1), [{ text: "Get down!" }], { key: "yanlis-anahtar-0000" });
+  assert.equal(wrong.status, 403);
+  assert.deepEqual(await wrong.json(), { error: "app_key_invalid" });
+  assert.equal(DB.writes, 0);
+  assert.equal(DB.batchCalls, 0);
+});
+
+test("anahtarlı uygulama aynı süzgeç ve eşikle kabul edilir, uygulama adıyla günlüğe yazılır", async () => {
+  const DB = fakeDB();
+  const env = { DB, APP_KEYS: JSON.stringify({ [APP_KEY]: { name: "gametranslator", daily: 1000 } }) };
+  const logged = [];
+  const original = console.log;
+  console.log = (line) => logged.push(String(line));
+  try {
+    const first = await postApp(env, install(1), [{ text: "Oturum Açtı" }, { text: "Get down!" }], { key: APP_KEY });
+    assert.equal(first.status, 200);
+    assert.deepEqual(await first.json(), { accepted: 1, recorded: 1 });
+    assert.equal(DB.lines.size, 0, "tek kurulum havuza girmez");
+    await postApp(env, install(2), [{ text: "Get down!" }], { key: APP_KEY });
+    assert.deepEqual([...DB.lines.values()].map((l) => l.installs), [2]);
+  } finally {
+    console.log = original;
+  }
+  assert.ok(logged.some((l) => JSON.parse(l).client === "gametranslator" && JSON.parse(l).app === "GameTranslator 1.6.6"));
+});
+
+test("uygulamanın günlük toplam sınırı kurulum sınırına ek olarak uygulanır", async () => {
+  const DB = fakeDB();
+  const env = { DB, APP_KEYS: JSON.stringify({ [APP_KEY]: { name: "gametranslator", daily: 15 } }) };
+  const day = new Date().toISOString().slice(0, 10);
+  const lines = (n, tag) => Array.from({ length: n }, (_, j) => ({ text: `Hold the line ${tag} ${j} please.` }));
+  const a = await postApp(env, install(1), lines(10, "a"), { key: APP_KEY });
+  assert.deepEqual(await a.json(), { accepted: 10, recorded: 10 });
+  const b = await postApp(env, install(2), lines(10, "b"), { key: APP_KEY });
+  assert.deepEqual(await b.json(), { accepted: 5, recorded: 5 });
+  const c = await postApp(env, install(3), lines(10, "c"), { key: APP_KEY });
+  assert.equal(c.status, 429);
+  assert.deepEqual(await c.json(), { error: "app_quota" });
+  assert.ok(Number(c.headers.get("retry-after")) >= 60);
+  assert.equal(DB.quotas.get(`app:gametranslator\u001f${day}`), 15);
+  assert.equal(DB.quotaWrites, 3, "uygulama sayacı bir kez, iki kurulum birer kez");
+  // Kendi istemcilerimiz uygulama sınırından etkilenmez.
+  assert.equal((await postLines(env, install(4), lines(10, "d"))).status, 200);
 });
