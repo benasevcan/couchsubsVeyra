@@ -73,7 +73,38 @@
   // Son altyazının yerleşimi: 'fixed' (sabit yükseklik), 'cover', 'above' ya da 'below'.
   var shownMode = 'fixed';
   var lastStyle = {};
-  var TEXT_COLORS = { white: '#FFFFFF', yellow: '#FFE135' };
+  var TEXT_COLORS = {
+    white: '#FFFFFF',
+    yellow: '#FFE135',
+    cyan: '#22D3EE',
+    green: '#4ADE80',
+    orange: '#FB923C',
+    pink: '#F472B6',
+    lightblue: '#93C5FD'
+  };
+  var BG_RGB = {
+    black: '0, 0, 0',
+    darkgray: '30, 32, 36',
+    navy: '15, 23, 42'
+  };
+  function validHex(hex) {
+    return typeof hex === 'string' && /^#[0-9a-fA-F]{6}$|^#[0-9a-fA-F]{8}$/.test(hex.trim()) ? hex.trim() : null;
+  }
+  function resolveTextColor(style) {
+    if (style.textColor === 'custom') return validHex(style.customTextColor) || '#FFFFFF';
+    return TEXT_COLORS[style.textColor] || null;
+  }
+  function resolveShadow(strength) {
+    if (strength === 'none') return 'none';
+    if (strength === 'strong') return '0 3px 8px #000, 0 0 6px #000';
+    if (strength === 'outline') return '-1.5px -1.5px 0 #000, 1.5px -1.5px 0 #000, -1.5px 1.5px 0 #000, 1.5px 1.5px 0 #000, 0 0 4px #000';
+    return '0 0 0.12em #000, 0 0.06em 0.12em #000';
+  }
+  function radiusPixels(size) {
+    var clamped = Math.max(0, Math.min(48, Number(size)));
+    if (clamped <= 0) return '0px';
+    return Math.max(1, Math.round(clamped * (window.innerHeight || 1080) / 1080)) + 'px';
+  }
   var turkish = (navigator.language || 'tr').toLowerCase().indexOf('tr') === 0;
   var TEXTS = turkish
     ? { waiting: 'CouchSubs: altyazı bekleniyor', offline: 'CouchSubs uygulamasına bağlanılamadı' }
@@ -164,10 +195,11 @@
   }
 
   /// Sayfa renkli zeminliyse yarı saydam kutu zeminle karışıp chroma key'i bozar; kutu ya tam koyu ya hiç yoktur.
-  function boxColor(percent) {
+  function boxColor(percent, bgColorName) {
     var alpha = Math.max(0, Math.min(100, percent)) / 100;
     if (pageColor) alpha = alpha > 0 ? 1 : 0;
-    return 'rgba(0, 0, 0, ' + alpha + ')';
+    var rgb = BG_RGB[bgColorName] || BG_RGB.black;
+    return 'rgba(' + rgb + ', ' + alpha + ')';
   }
 
   function apply(style) {
@@ -183,10 +215,19 @@
       if (shownMode === 'fixed') wrap.style.bottom = bottom + '%';
     }
     var bg = fixed.bg !== null ? Number(fixed.bg) : style.background;
-    if (typeof bg === 'number' && !isNaN(bg)) line.style.background = boxColor(bg);
-    else if (pageColor) line.style.background = boxColor(60);
+    var bgName = style.backgroundColor;
+    if (typeof bg === 'number' && !isNaN(bg)) line.style.background = boxColor(bg, bgName);
+    else if (pageColor) line.style.background = boxColor(60, bgName);
+    var band = style.backgroundShape === 'band';
+    if (band) line.style.borderRadius = '0px';
+    else if (typeof style.backgroundRadius === 'number' && !isNaN(style.backgroundRadius))
+      line.style.borderRadius = radiusPixels(style.backgroundRadius);
     if (typeof style.bold === 'boolean') line.style.fontWeight = style.bold ? '700' : '600';
-    if (TEXT_COLORS[style.textColor]) line.style.color = TEXT_COLORS[style.textColor];
+    if (typeof style.fontFamily === 'string' && style.fontFamily.trim())
+      line.style.fontFamily = '"' + style.fontFamily.replace(/"/g, '') + '", -apple-system, "Segoe UI", system-ui, sans-serif';
+    line.style.textShadow = resolveShadow(style.shadowStrength);
+    var textColor = resolveTextColor(style);
+    if (textColor) line.style.color = textColor;
     if (style.placement) placement = style.placement;
     for (var id in regions) styleRegion(regions[id]);
   }
@@ -196,7 +237,12 @@
     var box = node.box;
     node.style.fontSize = pixels(Math.max(12, baseSize * 0.55));
     node.style.color = line.style.color || '#fff';
-    if (pageColor) node.style.background = '#000';
+    node.style.fontFamily = line.style.fontFamily || '';
+    node.style.textShadow = line.style.textShadow || '';
+    if (lastStyle && typeof lastStyle.backgroundRadius === 'number' && !isNaN(lastStyle.backgroundRadius))
+      node.style.borderRadius = radiusPixels(lastStyle.backgroundRadius * 0.8);
+    if (pageColor) node.style.background = 'rgb(' + (BG_RGB[lastStyle && lastStyle.backgroundColor] || BG_RGB.black) + ')';
+    else if (lastStyle && lastStyle.backgroundColor) node.style.background = boxColor(85, lastStyle.backgroundColor);
     if (box) {
       node.style.left = (box.left * 100) + '%';
       node.style.top = (box.top * 100) + '%';
@@ -274,8 +320,12 @@
       // Örtü de "Arka plan koyuluğu"na uyar (eskiden hep %97'ydi, kaydırıcı örtüde işe yaramıyordu); %100 tamamen
       // opaktır. Koyuluğu göndermeyen eski sürümlerde örtü %97 kalır.
       var bg = fixed.bg !== null ? Number(fixed.bg) : (lastStyle && lastStyle.background);
-      line.style.background = typeof bg === 'number' && !isNaN(bg) ? (bg >= 100 ? '#000' : boxColor(bg)) : 'rgba(0, 0, 0, 0.97)';
-      if (pageColor) line.style.background = '#000';
+      var bgName = lastStyle && lastStyle.backgroundColor;
+      line.style.background = typeof bg === 'number' && !isNaN(bg) ? boxColor(bg, bgName) : boxColor(97, bgName);
+      if (pageColor) line.style.background = 'rgb(' + (BG_RGB[bgName] || BG_RGB.black) + ')';
+      if (band) line.style.borderRadius = '0px';
+      else if (lastStyle && typeof lastStyle.backgroundRadius === 'number' && !isNaN(lastStyle.backgroundRadius))
+        line.style.borderRadius = radiusPixels(lastStyle.backgroundRadius);
       line.className = 'on cover';
     } else {
       line.style.left = '';

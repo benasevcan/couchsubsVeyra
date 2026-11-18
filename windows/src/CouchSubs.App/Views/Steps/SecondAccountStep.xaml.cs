@@ -12,7 +12,7 @@ public partial class SecondAccountStep : UserControl
     public SecondAccountStep()
     {
         InitializeComponent();
-        // PS Remote Play ya da chiaki-ng kurulu değilse indirme düğmeleri görünür.
+        // Veyra, PS Remote Play ya da chiaki-ng bulunamadıysa seçme/indirme düğmeleri görünür.
         Loaded += (_, _) => DownloadPanel.Visibility =
             Controller.RemotePlayInstalled(RemotePlayApp.Automatic) ? Visibility.Collapsed : Visibility.Visible;
     }
@@ -21,6 +21,13 @@ public partial class SecondAccountStep : UserControl
 
     /// <summary>"İkinci hesap yok mu?": görüntü bu bilgisayardaki Remote Play penceresinden okunur, kurulum biter.</summary>
     private void OnUseRemotePlayWindow(object sender, RoutedEventArgs e) => Controller.UseRemotePlayWindow();
+
+    private void OnSelectVeyra(object sender, RoutedEventArgs e)
+    {
+        if (SettingsWindow.PickVeyraExecutable(Window.GetWindow(this), Controller.Settings.VeyraExecutablePath) is not { } path) return;
+        Controller.Settings = Controller.Settings with { VeyraExecutablePath = path, RemotePlayApp = RemotePlayApp.Veyra };
+        Controller.UseRemotePlayWindow();
+    }
 
     private void OnUseCaptureWindow(object sender, RoutedEventArgs e) => Controller.UseCaptureWindow();
 

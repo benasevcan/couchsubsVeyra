@@ -6,7 +6,6 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
-using System.Windows.Media.Effects;
 using System.Windows.Threading;
 using CouchSubs.Core;
 using CouchSubs.Shell;
@@ -206,27 +205,29 @@ public sealed class StreamWindow : Window
         var wrapped = line.Wrapped;
         var size = Math.Max(1, OverlayPlacement.FontSize(style.FontSize) * scale * (current ? 1 : 0.8) * wrapped.Scale);
         var boxed = StreamBackgrounds.BoxOpacity(style.Background) > 0;
+        var band = style.BackgroundShape == SubtitleBackgroundShape.Band;
         var dim = line.Role switch { SubtitleStack.Role.Current => 1.0, SubtitleStack.Role.Previous => 0.6, _ => 0.45 };
-        var color = style.TextColor == SubtitleTextColor.Yellow ? Color.FromRgb(0xFF, 0xE1, 0x35) : Colors.White;
-        if (boxed) color.A = (byte)Math.Round(dim * 255);
         var text = new TextBlock
         {
             Text = wrapped.Text,
+            FontFamily = SubtitleStyleVisuals.ResolveFontFamily(style.FontFamily),
             FontSize = size,
             FontWeight = style.Bold ? FontWeights.Bold : FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(color),
+            Foreground = SubtitleStyleVisuals.ResolveTextBrush(style, boxed ? dim : 1.0),
             TextWrapping = TextWrapping.Wrap,
             TextAlignment = line.Paragraphs ? TextAlignment.Left : TextAlignment.Center,
             LineHeight = size * 1.3,
-            Effect = boxed ? null : new DropShadowEffect { Color = Colors.Black, ShadowDepth = 2 * scale, BlurRadius = 4 * scale, Opacity = 1, Direction = 270 },
+            Effect = boxed ? null : SubtitleStyleVisuals.ResolveShadowEffect(style.ShadowStrength, scale),
         };
         return new Border
         {
-            Background = boxed ? Brushes.Black : Brushes.Transparent,
-            CornerRadius = new CornerRadius(10 * scale),
+            Background = boxed
+                ? new SolidColorBrush(SubtitleStyleVisuals.ResolveBackgroundColor(style.BackgroundColor, 255))
+                : Brushes.Transparent,
+            CornerRadius = new CornerRadius(SubtitleStyleVisuals.ResolveCornerRadius(style, band, scale)),
             Padding = current ? new Thickness(26 * scale, 10 * scale, 26 * scale, 10 * scale) : new Thickness(20 * scale, 6 * scale, 20 * scale, 6 * scale),
-            Margin = new Thickness(0, 14 * scale, 0, 0),
-            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(band ? -24 * scale : 0, 14 * scale, band ? -24 * scale : 0, 0),
+            HorizontalAlignment = band ? HorizontalAlignment.Stretch : HorizontalAlignment.Center,
             Child = text,
         };
     }
@@ -240,19 +241,21 @@ public sealed class StreamWindow : Window
         var middle = area is { } box ? (box.Left + box.Right) / 2 : 0.5;
         return new Border
         {
-            Background = Brushes.Black,
-            CornerRadius = new CornerRadius(8 * scale),
+            Background = new SolidColorBrush(SubtitleStyleVisuals.ResolveBackgroundColor(style.BackgroundColor, 255)),
+            CornerRadius = new CornerRadius(SubtitleStyleVisuals.ResolveCornerRadius(style, fullWidthBand: false, scale * 0.8)),
             Padding = new Thickness(14 * scale, 6 * scale, 14 * scale, 6 * scale),
             Margin = new Thickness(0, 0, 0, 10 * scale),
             HorizontalAlignment = middle < 0.4 ? HorizontalAlignment.Left : middle > 0.6 ? HorizontalAlignment.Right : HorizontalAlignment.Center,
             Child = new TextBlock
             {
                 Text = text,
+                FontFamily = SubtitleStyleVisuals.ResolveFontFamily(style.FontFamily),
                 FontSize = size,
                 FontWeight = FontWeights.SemiBold,
-                Foreground = style.TextColor == SubtitleTextColor.Yellow ? new SolidColorBrush(Color.FromRgb(0xFF, 0xE1, 0x35)) : Brushes.White,
+                Foreground = SubtitleStyleVisuals.ResolveTextBrush(style),
                 TextWrapping = TextWrapping.Wrap,
                 LineHeight = size * 1.25,
+                Effect = SubtitleStyleVisuals.ResolveShadowEffect(style.ShadowStrength, scale),
             },
         };
     }

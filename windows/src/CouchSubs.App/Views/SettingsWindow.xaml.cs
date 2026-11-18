@@ -46,27 +46,25 @@ public partial class SettingsWindow : Window
         TextSize.Value = Math.Clamp(settings.Style.FontSize, TextSize.Minimum, TextSize.Maximum);
         TextSizeValue.Text = ((int)TextSize.Value).ToString();
         Position.Value = settings.Style.BottomPercent;
-        Placement.SelectedItem = Placement.Items.Cast<ComboBoxItem>().First(item => (string)item.Tag == settings.Style.Placement.ToString());
+        SelectByTag(Placement, settings.Style.Placement.ToString());
         ShowPlacement(settings.Style.Placement);
         BackgroundOpacity.Value = settings.Style.Background;
-        BackgroundShape.SelectedItem = BackgroundShape.Items.Cast<ComboBoxItem>().First(item => (string)item.Tag == settings.Style.BackgroundShape.ToString());
+        SelectByTag(BackgroundShape, settings.Style.BackgroundShape.ToString());
+        BackgroundRadius.Value = Math.Clamp(settings.Style.BackgroundRadius, BackgroundRadius.Minimum, BackgroundRadius.Maximum);
+        BackgroundRadiusValue.Text = $"{(int)BackgroundRadius.Value} px";
         Bold.IsChecked = settings.Style.Bold;
         StackPrevious.IsChecked = settings.Style.StackPrevious;
         MisreadWait.Value = settings.MisreadWaitMs / 1000.0;
         PartialWait.Value = settings.PartialWaitMs / 1000.0;
         ShowWaits();
-        TextColor.SelectedItem = TextColor.Items.Cast<ComboBoxItem>().FirstOrDefault(item => (string)item.Tag == settings.Style.TextColor.ToString())
-            ?? TextColor.Items[0];
+        SelectByTag(TextColor, settings.Style.TextColor.ToString());
         CustomTextColor.Text = string.IsNullOrWhiteSpace(settings.Style.CustomTextColor) ? "#FFFFFF" : settings.Style.CustomTextColor;
         UpdateCustomColorPreview(settings.Style.TextColor, CustomTextColor.Text);
         var fontName = string.IsNullOrWhiteSpace(settings.Style.FontFamily) ? "Segoe UI" : settings.Style.FontFamily;
-        FontFamilyChoice.SelectedItem = FontFamilyChoice.Items.Cast<ComboBoxItem>().FirstOrDefault(item => string.Equals((string)item.Tag, fontName, StringComparison.OrdinalIgnoreCase))
-            ?? FontFamilyChoice.Items[0];
-        ShadowStrengthChoice.SelectedItem = ShadowStrengthChoice.Items.Cast<ComboBoxItem>().FirstOrDefault(item => (string)item.Tag == settings.Style.ShadowStrength.ToString())
-            ?? ShadowStrengthChoice.Items[0];
-        BackgroundColorChoice.SelectedItem = BackgroundColorChoice.Items.Cast<ComboBoxItem>().FirstOrDefault(item => (string)item.Tag == settings.Style.BackgroundColor.ToString())
-            ?? BackgroundColorChoice.Items[0];
-        DisplayMode.SelectedItem = DisplayMode.Items.Cast<ComboBoxItem>().First(item => (string)item.Tag == settings.Style.DisplayMode.ToString());
+        SelectByTag(FontFamilyChoice, fontName, ignoreCase: true);
+        SelectByTag(ShadowStrengthChoice, settings.Style.ShadowStrength.ToString());
+        SelectByTag(BackgroundColorChoice, settings.Style.BackgroundColor.ToString());
+        SelectByTag(DisplayMode, settings.Style.DisplayMode.ToString());
         // Yalnız çeviri modeli olan diller listelenir; tek dil varsa seçim gösterilmez.
         foreach (var (code, name) in Languages.Where(l => controller.SupportsLanguage(l.Code)))
             GameLanguage.Items.Add(new ComboBoxItem { Content = Localizer.Current[name], Tag = code, IsSelected = code == settings.SourceLanguage });
@@ -77,8 +75,7 @@ public partial class SettingsWindow : Window
         // Localhost'u kabul etmeyen yayın programları (TikTok LIVE Studio) için aynı adres bilgisayarın ağ adresiyle.
         if (controller.NetworkObsAddress is { } networkObs) NetworkObsAddress.Text = networkObs;
         else NetworkObsPanel.Visibility = Visibility.Collapsed;
-        var streamBackground = controller.StreamBackground.ToString();
-        StreamBackgroundChoice.SelectedItem = StreamBackgroundChoice.Items.Cast<ComboBoxItem>().First(item => (string)item.Tag == streamBackground);
+        SelectByTag(StreamBackgroundChoice, controller.StreamBackground.ToString());
         ShowArea(0);
         ShowAreaProfile();
         // Num 8: oyunun o anki görüntüsü önizlemeye alınır.
@@ -90,13 +87,13 @@ public partial class SettingsWindow : Window
         ShowStyleTitle();
         controller.PropertyChanged += OnControllerChanged;
         Closed += (_, _) => controller.PropertyChanged -= OnControllerChanged;
-        Engine.SelectedItem = Engine.Items.Cast<ComboBoxItem>().First(item => (string)item.Tag == settings.Engine.ToString());
-        TranslationDeviceChoice.SelectedItem = TranslationDeviceChoice.Items.Cast<ComboBoxItem>()
-            .First(item => (string)item.Tag == settings.TranslationDevice.ToString());
+        SelectByTag(Engine, settings.Engine.ToString());
+        SelectByTag(TranslationDeviceChoice, settings.TranslationDevice.ToString());
         foreach (var count in CpuThreadOptions.Available(Environment.ProcessorCount))
             CpuThreadChoice.Items.Add(new ComboBoxItem { Content = count.ToString(), Tag = count });
         CpuThreadChoice.SelectedItem = CpuThreadChoice.Items.Cast<ComboBoxItem>()
-            .First(item => (int)item.Tag == CpuThreadOptions.Normalize(settings.CpuTranslationThreads, Environment.ProcessorCount));
+            .FirstOrDefault(item => (int)item.Tag == CpuThreadOptions.Normalize(settings.CpuTranslationThreads, Environment.ProcessorCount))
+            ?? CpuThreadChoice.Items[0];
         FastSubtitleDetection.IsChecked = settings.FastSubtitleDetection;
         ShowCpuThreads();
         ShowEngine();
@@ -105,9 +102,9 @@ public partial class SettingsWindow : Window
         AskGame.IsChecked = settings.AskGame;
         SpeakerNames.IsChecked = settings.ShowSpeakerNames;
         ShowPacks();
-        AppearanceChoice.SelectedItem = AppearanceChoice.Items.Cast<ComboBoxItem>().First(item => (string)item.Tag == settings.Appearance.ToString());
-        FrameSourceChoice.SelectedItem = FrameSourceChoice.Items.Cast<ComboBoxItem>().First(item => (string)item.Tag == settings.FrameSource.ToString());
-        RemotePlayAppChoice.SelectedItem = RemotePlayAppChoice.Items.Cast<ComboBoxItem>().First(item => (string)item.Tag == settings.RemotePlayApp.ToString());
+        SelectByTag(AppearanceChoice, settings.Appearance.ToString());
+        SelectByTag(FrameSourceChoice, settings.FrameSource.ToString());
+        SelectByTag(RemotePlayAppChoice, settings.RemotePlayApp.ToString());
         XboxAudioOnComputer.IsChecked = settings.XboxAudioOnComputer;
         XboxLegacyFrameRate.IsChecked = settings.XboxLegacyFrameRate;
         PlayStationPictureSourceCard.Visibility = controller.IsXbox ? Visibility.Collapsed : Visibility.Visible;
@@ -155,14 +152,46 @@ public partial class SettingsWindow : Window
         CaptureWindowPanel.Visibility = capture ? Visibility.Visible : Visibility.Collapsed;
         if (capture) RefreshCaptureWindows();
         Ps5SourceHint.Visibility = window || capture ? Visibility.Collapsed : Visibility.Visible;
-        SonyInstallRow.Visibility = ChiakiInstallRow.Visibility = window ? Visibility.Visible : Visibility.Collapsed;
+        VeyraInstallRow.Visibility = SonyInstallRow.Visibility = ChiakiInstallRow.Visibility = window ? Visibility.Visible : Visibility.Collapsed;
+        var veyra = controller.RemotePlayInstalled(RemotePlayApp.Veyra);
         var sony = controller.RemotePlayInstalled(RemotePlayApp.Sony);
         var chiaki = controller.RemotePlayInstalled(RemotePlayApp.Chiaki);
+        VeyraInstalledText.Visibility = veyra ? Visibility.Visible : Visibility.Collapsed;
+        VeyraBrowseButton.Content = Localizer.Current[veyra ? "Change…" : "Select Veyra…"];
         SonyInstalledText.Visibility = sony ? Visibility.Visible : Visibility.Collapsed;
         SonyDownloadButton.Visibility = sony ? Visibility.Collapsed : Visibility.Visible;
         ChiakiInstalledText.Visibility = chiaki ? Visibility.Visible : Visibility.Collapsed;
         ChiakiDownloadButton.Visibility = chiaki ? Visibility.Collapsed : Visibility.Visible;
         Ps5LinkPanel.Visibility = controller.NeedsPs5Link ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private static void SelectByTag(ComboBox box, string? tag, bool ignoreCase = false)
+    {
+        var comparison = ignoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        box.SelectedItem = box.Items.Cast<ComboBoxItem>()
+            .FirstOrDefault(item => string.Equals(item.Tag as string, tag, comparison))
+            ?? (box.Items.Count > 0 ? box.Items[0] : null);
+    }
+
+    internal static string? PickVeyraExecutable(Window? owner, string? currentPath = null)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = Localizer.Current["Choose Veyra executable"],
+            Filter = "Veyra (veyra_qml_ui.exe;veyra.exe)|veyra_qml_ui.exe;veyra.exe|Program (*.exe)|*.exe",
+            CheckFileExists = true,
+        };
+        if (currentPath is { } existing && Path.GetDirectoryName(existing) is { } dir && Directory.Exists(dir))
+            dialog.InitialDirectory = dir;
+        return dialog.ShowDialog(owner) == true ? dialog.FileName : null;
+    }
+
+    private void OnSelectVeyra(object sender, RoutedEventArgs e)
+    {
+        if (PickVeyraExecutable(this, controller.Settings.VeyraExecutablePath) is not { } path) return;
+        Update(s => s with { VeyraExecutablePath = path, RemotePlayApp = RemotePlayApp.Veyra });
+        SelectByTag(RemotePlayAppChoice, RemotePlayApp.Veyra.ToString());
+        ShowFrameSource();
     }
 
     private void OnDownloadSony(object sender, RoutedEventArgs e) => OpenUrl(AppController.SonyRemotePlayDownload);
@@ -753,6 +782,14 @@ public partial class SettingsWindow : Window
 
     private void OnBackground(object sender, RoutedPropertyChangedEventArgs<double> e) =>
         Update(s => s with { Style = s.Style with { Background = (int)Math.Round(e.NewValue) } });
+
+    private void OnBackgroundRadius(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (loading) return;
+        var radius = (int)Math.Round(e.NewValue);
+        BackgroundRadiusValue.Text = $"{radius} px";
+        Update(s => s with { Style = s.Style with { BackgroundRadius = radius } });
+    }
 
     private void OnBackgroundShape(object sender, SelectionChangedEventArgs e)
     {

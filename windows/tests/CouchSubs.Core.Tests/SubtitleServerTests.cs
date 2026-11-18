@@ -234,8 +234,44 @@ public class SubtitleServerTests
     {
         var style = System.Text.Json.JsonSerializer.Deserialize<SubtitleStyle>("{\"FontSize\":58,\"BottomPercent\":12}");
         Assert.Equal(new SubtitleStyle(58, 12, SubtitlePlacement.Cover, 72, false), style);
-        var again = System.Text.Json.JsonSerializer.Deserialize<SubtitleStyle>(System.Text.Json.JsonSerializer.Serialize(style! with { Placement = SubtitlePlacement.Below }));
+        Assert.Equal(14, style!.BackgroundRadius);
+        var again = System.Text.Json.JsonSerializer.Deserialize<SubtitleStyle>(System.Text.Json.JsonSerializer.Serialize(style! with { Placement = SubtitlePlacement.Below, BackgroundRadius = 22 }));
         Assert.Equal(SubtitlePlacement.Below, again!.Placement);
+        Assert.Equal(22, again.BackgroundRadius);
+    }
+
+    [Fact]
+    public async Task ExtendedStyleFieldsReachStyleStream()
+    {
+        using var server = new SubtitleServer(0);
+        var port = await server.StartAsync();
+        server.SendStyle(new SubtitleStyle(
+            FontSize: 50,
+            BottomPercent: 8,
+            Placement: SubtitlePlacement.Cover,
+            Background: 65,
+            Bold: true,
+            TextColor: SubtitleTextColor.Cyan,
+            DisplayMode: TvDisplayMode.InApp,
+            StackPrevious: true,
+            BackgroundShape: SubtitleBackgroundShape.Fit,
+            CustomTextColor: "#112233",
+            FontFamily: "Arial",
+            ShadowStrength: SubtitleShadowStrength.Outline,
+            BackgroundColor: SubtitleBackgroundColor.Navy,
+            BackgroundRadius: 24));
+
+        using var response = await Http.GetAsync($"http://127.0.0.1:{port}/events", HttpCompletionOption.ResponseHeadersRead);
+        using var reader = new StreamReader(await response.Content.ReadAsStreamAsync());
+        string? data = null;
+        while (await reader.ReadLineAsync() is { } line)
+            if (line.StartsWith("data:")) { data = line; break; }
+        Assert.Contains("\"backgroundRadius\":24", data);
+        Assert.Contains("\"textColor\":\"cyan\"", data);
+        Assert.Contains("\"customTextColor\":\"#112233\"", data);
+        Assert.Contains("\"fontFamily\":\"Arial\"", data);
+        Assert.Contains("\"shadowStrength\":\"outline\"", data);
+        Assert.Contains("\"backgroundColor\":\"navy\"", data);
     }
 
     [Fact]

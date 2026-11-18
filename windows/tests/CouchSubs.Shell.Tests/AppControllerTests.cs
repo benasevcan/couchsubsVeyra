@@ -107,6 +107,8 @@ internal sealed class FakeServices : IAppServices
     /// <summary>PS Remote Play / chiaki-ng bu bilgisayarda kurulu mu (Ayarlar'daki indirme satırları, ana ekran uyarısı).</summary>
     public bool RemotePlayIsInstalled { get; set; } = true;
     public bool RemotePlayInstalled(RemotePlayApp app) => RemotePlayIsInstalled;
+    public List<string?> VeyraPaths { get; } = [];
+    public void SetVeyraPath(string? path) => VeyraPaths.Add(path);
     public List<ConsoleInfo> Consoles { get; } = [new("192.168.1.253", "PS5-789", true)];
     public List<LgTv> Tvs { get; } = [new("LG TV", "192.168.1.153")];
     public RegisteredConsole? Registered { get; private set; }
@@ -1049,6 +1051,28 @@ public class AppControllerRunTests
         services.RemotePlayIsInstalled = true;
         Assert.False(controller.RemotePlayMissing);
         Assert.Equal("Reads the Remote Play window on this PC when you start translating.", controller.Ps5StatusText);
+    }
+
+    [Fact]
+    public void VeyraRemotePlayAppAndCustomPathAreTracked()
+    {
+        var settings = new MemorySettings();
+        settings.Save(new UserSettings
+        {
+            FrameSource = FrameSource.RemotePlayWindow,
+            RemotePlayApp = RemotePlayApp.Veyra,
+            VeyraExecutablePath = @"C:\Portable\Veyra\veyra_qml_ui.exe",
+            Output = SubtitleOutput.Computer,
+        });
+        var services = new FakeServices { RemotePlayIsInstalled = true };
+        var controller = AppControllerTests.Make(services, settings: settings);
+
+        Assert.Equal([@"C:\Portable\Veyra\veyra_qml_ui.exe"], services.VeyraPaths);
+        Assert.Equal("Reads the Veyra window on this PC when you start translating.", controller.Ps5StatusText);
+
+        controller.Settings = controller.Settings with { VeyraExecutablePath = @"D:\Veyra\veyra_qml_ui.exe" };
+        Assert.Equal([@"C:\Portable\Veyra\veyra_qml_ui.exe", @"D:\Veyra\veyra_qml_ui.exe"], services.VeyraPaths);
+        controller.Dispose();
     }
 
     [Fact]

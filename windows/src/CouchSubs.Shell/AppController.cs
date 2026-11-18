@@ -135,6 +135,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         {
             CpuTranslationThreads = CpuThreadOptions.Normalize(loaded.CpuTranslationThreads, Environment.ProcessorCount),
         };
+        services.SetVeyraPath(settings.VeyraExecutablePath);
         // Uygulama oturum sürerken kapandıysa oyunun profili açık kalmış olabilir: açılışta genel alanlar geri gelir.
         if (settings.ActiveAreaProfile is not null || settings.GeneralAreas is not null) settings = settings.WithGeneralAreas();
         services.Translation.SelectCpuThreads(settings.CpuTranslationThreads);
@@ -313,7 +314,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     public SessionState SessionState { get => sessionState; private set => Set(ref sessionState, value, [nameof(Ps5StatusText), nameof(Ps5Tone)]); }
     public string Ps5StatusText => IsXbox ? XboxStatusText()
         : settings.FrameSource == FrameSource.RemotePlayWindow
-            ? WindowStatusText(sessionState, isRunning, text, installed: !RemotePlayMissing)
+            ? WindowStatusText(sessionState, isRunning, text, installed: !RemotePlayMissing, app: settings.RemotePlayApp)
             : settings.FrameSource == FrameSource.CaptureWindow
                 ? CaptureWindowStatusText(sessionState, isRunning, text, settings.CaptureWindow)
                 : StatusText(sessionState, isRunning, text, console is null ? null : string.IsNullOrEmpty(console.Name) ? "PS5" : console.Name);
@@ -386,6 +387,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             var old = settings;
             if (!Set(ref settings, value, [nameof(UsesFreeGemini)])) return;
             settingsStore.Save(value);
+            if (old.VeyraExecutablePath != value.VeyraExecutablePath)
+                services.SetVeyraPath(value.VeyraExecutablePath);
             server.SendStyle(value.Style);
             if (old.Output != value.Output) OutputChanged();
             if (old.Dubbing != value.Dubbing) DubbingSettingsChanged(old.Dubbing);
@@ -404,7 +407,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             if (old.ActiveAreaProfile != value.ActiveAreaProfile || old.AreaProfiles != value.AreaProfiles || old.Areas != value.Areas
                 || old.FrameSource != value.FrameSource)
                 Changed(nameof(AreaProfileGame), nameof(AreaProfileUnsaved), nameof(AreaProfileTarget));
-            if (old.FrameSource != value.FrameSource || old.CaptureWindow != value.CaptureWindow)
+            if (old.FrameSource != value.FrameSource || old.CaptureWindow != value.CaptureWindow
+                || old.RemotePlayApp != value.RemotePlayApp || old.VeyraExecutablePath != value.VeyraExecutablePath)
                 Changed(nameof(CanStart), nameof(Ps5StatusText), nameof(ConsoleTitle));
             var windowAppChanged = value.FrameSource == FrameSource.RemotePlayWindow && old.RemotePlayApp != value.RemotePlayApp;
             var captureWindowChanged = value.FrameSource == FrameSource.CaptureWindow && old.CaptureWindow != value.CaptureWindow;
@@ -1551,17 +1555,24 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             : text.Format("Waiting for the selected window: %@", target.Title);
     }
 
-    public static string WindowStatusText(SessionState state, bool running, Localizer text, bool installed = true)
+    public static string WindowStatusText(SessionState state, bool running, Localizer text, bool installed = true, RemotePlayApp app = RemotePlayApp.Automatic)
     {
-        const string waiting = "Waiting for the Remote Play window. Open PS Remote Play or chiaki-ng on this PC.";
+        var isVeyra = app == RemotePlayApp.Veyra;
+        var waiting = isVeyra
+            ? "Waiting for the Veyra window. Open Veyra on this PC."
+            : "Waiting for the Remote Play window. Open PS Remote Play or chiaki-ng on this PC.";
         if (state.Phase != SessionPhase.Streaming && !installed)
-            return text["The Remote Play app isn't installed on this PC. Download it in Settings › Picture source."];
+            return text[isVeyra
+                ? "Veyra wasn't found automatically. Select Veyra in Settings › Picture source."
+                : "The Remote Play app isn't installed on this PC. Download it in Settings › Picture source."];
         switch (state.Phase)
         {
-            case SessionPhase.Streaming: return text["Reading the Remote Play window"];
+            case SessionPhase.Streaming: return text[isVeyra ? "Reading the Veyra window" : "Reading the Remote Play window"];
             case SessionPhase.Connecting: return text[waiting];
         }
-        if (!running) return text["Reads the Remote Play window on this PC when you start translating."];
+        if (!running) return text[isVeyra
+            ? "Reads the Veyra window on this PC when you start translating."
+            : "Reads the Remote Play window on this PC when you start translating."];
         return state.Reason?.Detail is { Length: > 0 } detail ? detail : text[waiting];
     }
 

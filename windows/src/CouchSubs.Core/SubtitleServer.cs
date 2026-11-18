@@ -36,8 +36,9 @@ public enum SubtitleBackgroundShape
 /// <summary>TV'de altyazının görünümü. Eski sürümün kaydettiği ayarlarda olmayan alanlar varsayılanla dolar.</summary>
 /// <param name="FontSize">36 (küçük), 46 (orta), 58 (büyük), 72 (çok büyük)</param>
 /// <param name="BottomPercent">Sabit yerleşimde altyazının ekranın altından uzaklığı, yüzde.</param>
-/// <param name="Background">Yazının arkasındaki siyah zeminin koyuluğu, yüzde (0: zemin yok).</param>
+/// <param name="Background">Yazının arkasındaki zeminin koyuluğu, yüzde (0: zemin yok).</param>
 /// <param name="BackgroundShape">Zeminin kapladığı alan; eski TV uygulamaları alanı tanımaz, yazı kadar gibi davranır.</param>
+/// <param name="BackgroundRadius">Altyazı çerçevesinin köşe yuvarlaklığı, piksel (0: keskin köşe).</param>
 /// <param name="StackPrevious">
 /// Hızlı konuşmada önceki satır(lar) yeni satırın üstünde kısa süre soluk kalsın mı; kapalıysa yeni satır eskisinin
 /// yerine geçer. TV uygulaması 0.9.16 ve sonrası tanır.
@@ -55,7 +56,8 @@ public sealed record SubtitleStyle(
     string CustomTextColor = "#FFFFFF",
     string FontFamily = "Segoe UI",
     SubtitleShadowStrength ShadowStrength = SubtitleShadowStrength.Normal,
-    SubtitleBackgroundColor BackgroundColor = SubtitleBackgroundColor.Black);
+    SubtitleBackgroundColor BackgroundColor = SubtitleBackgroundColor.Black,
+    int BackgroundRadius = 14);
 
 /// <summary>
 /// Android TV'de PS5 görüntüsünün nasıl gösterildiği. Yalnız Android TV uygulaması kullanır; diğer TV'ler ve OBS
@@ -533,12 +535,17 @@ public sealed class SubtitleServer(int port = 8787, TimeSpan? pingInterval = nul
         Frame("style", new SortedDictionary<string, object>
         {
             ["background"] = Math.Clamp(style.Background, 0, 100),
+            ["backgroundColor"] = style.BackgroundColor.ToString().ToLowerInvariant(),
+            ["backgroundRadius"] = Math.Clamp(style.BackgroundRadius, 0, 48),
             ["backgroundShape"] = style.BackgroundShape.ToString().ToLowerInvariant(),
             ["bold"] = style.Bold,
             ["bottomPercent"] = style.BottomPercent,
+            ["customTextColor"] = string.IsNullOrWhiteSpace(style.CustomTextColor) ? "#FFFFFF" : style.CustomTextColor,
             ["displayMode"] = style.DisplayMode == TvDisplayMode.Overlay ? "overlay" : "inApp",
+            ["fontFamily"] = string.IsNullOrWhiteSpace(style.FontFamily) ? "Segoe UI" : style.FontFamily,
             ["fontSize"] = style.FontSize,
             ["placement"] = style.Placement.ToString().ToLowerInvariant(),
+            ["shadowStrength"] = style.ShadowStrength.ToString().ToLowerInvariant(),
             ["stackPrevious"] = style.StackPrevious,
             ["textColor"] = style.TextColor.ToString().ToLowerInvariant(),
         });

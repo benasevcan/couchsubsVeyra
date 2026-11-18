@@ -38,7 +38,7 @@ html, body {
 #subtitle-cover {
   position: absolute;
   z-index: 9;
-  border-radius: 10px;
+  border-radius: 14px;
   background: rgba(0, 0, 0, 0.97);
 }
 #subtitle-cover.hidden { display: none; }
@@ -115,7 +115,7 @@ html, body {
 #subtitle-prev-text, #subtitle-prev2-text {
   display: inline-block;
   padding: 6px 20px;
-  border-radius: 10px;
+  border-radius: 14px;
   background: rgba(0, 0, 0, 0.6);
   font-size: 37px;
   line-height: 1.3;
@@ -128,7 +128,7 @@ html, body {
 #subtitle-text {
   display: inline-block;
   padding: 10px 26px;
-  border-radius: 10px;
+  border-radius: 14px;
   background: rgba(0, 0, 0, 0.72);
   font-size: 46px;
   line-height: 1.3;

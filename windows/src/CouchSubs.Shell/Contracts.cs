@@ -184,8 +184,8 @@ public enum FrameSource { Ps5, RemotePlayWindow, CaptureWindow }
 /// </summary>
 public sealed record WindowCaptureTarget(string ProcessName, string Title);
 
-/// <summary>Pencereden okunurken hangi Remote Play uygulaması: hangisi açıksa, yalnız Sony'ninki ya da yalnız chiaki-ng.</summary>
-public enum RemotePlayApp { Automatic, Sony, Chiaki }
+/// <summary>Pencereden okunurken hangi Remote Play uygulaması: hangisi açıksa, yalnız Sony, chiaki-ng ya da Veyra.</summary>
+public enum RemotePlayApp { Automatic, Sony, Chiaki, Veyra }
 
 /// <summary>Kalıcı ayarlar (şifreli depo değil, sıradan ayar dosyası).</summary>
 public sealed record UserSettings
@@ -287,6 +287,8 @@ public sealed record UserSettings
     public WindowCaptureTarget? CaptureWindow { get; init; }
     /// <summary>Pencereden okunurken hangi Remote Play uygulaması (bkz. <see cref="Shell.RemotePlayApp"/>).</summary>
     public RemotePlayApp RemotePlayApp { get; init; } = RemotePlayApp.Automatic;
+    /// <summary>Taşınabilir Veyra çalıştırılabilir dosyasının kullanıcı tarafından seçilen yolu (varsayılan null: otomatik bulunur).</summary>
+    public string? VeyraExecutablePath { get; init; }
     /// <summary>
     /// Kullanıcının değiştirdiği kısayollar (yalnız varsayılandan farklı olanlar; bkz. <see cref="HotkeyTable.Assign"/>).
     /// Eski ayar dosyalarında yoktur; o zaman bütün kısayollar varsayılandır.
@@ -555,8 +557,10 @@ public interface IAppServices
     IStreamSession MakeCaptureWindowStream(WindowCaptureTarget target) => throw new NotSupportedException();
     /// <summary>Kullanıcının seçebileceği görünür pencereler. PSN veya ekran paylaşım izni gerekmez.</summary>
     IReadOnlyList<WindowCaptureTarget> CaptureWindows() => [];
-    /// <summary>Seçilen Remote Play uygulaması (PS Remote Play ya da chiaki-ng) bu bilgisayarda kurulu mu.</summary>
+    /// <summary>Seçilen Remote Play uygulaması (Veyra, PS Remote Play ya da chiaki-ng) bu bilgisayarda kurulu mu.</summary>
     bool RemotePlayInstalled(RemotePlayApp app) => true;
+    /// <summary>Kullanıcının seçtiği taşınabilir Veyra yolunu pencere akışına bildirir.</summary>
+    void SetVeyraPath(string? path) { }
     /// <param name="appConnected">TV uygulaması bilgisayara bağlı mı (Samsung'da bağlıyken TV'ye dokunulmaz).</param>
     /// <param name="onMoved">TV ağda yeni bir adreste bulununca çağrılır.</param>
     /// <param name="onKey">TV bağlantıda yeni jeton verdi (Samsung); saklanır.</param>

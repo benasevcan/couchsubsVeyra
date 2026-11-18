@@ -29,11 +29,15 @@ public sealed class RemotePlayWindowStream : IStreamSession
     /// <summary>Remote Play'in küçük pencereleri (giriş, denetim) oyun penceresi sanılmasın.</summary>
     private const int MinimumWidth = 400, MinimumHeight = 250;
     private static readonly TimeSpan SearchInterval = TimeSpan.FromSeconds(2);
-    /// <summary>Bu kadar ardışık kare simsiyah gelirse uygulama ekran yakalamayı engelliyor olabilir; bir kez uyarılır.</summary>
+    /// <summary>İlk kare gelmeden siyah gelirse yakalama engelleniyor olabilir; sahne kararması için daha uzun beklenir.</summary>
     private const int BlackFramesBeforeWarning = FramesPerSecond * 4;
+    private const int BlackFramesAfterContentWarning = FramesPerSecond * 15;
 
     private static readonly string[] SonyProcesses = ["RemotePlay"];
-    private static readonly string[] ChiakiProcesses = ["chiaki", "chiaki-ng", "veyra_qml_ui"];
+    private static readonly string[] ChiakiProcesses = ["chiaki", "chiaki-ng"];
+    private static readonly string[] VeyraProcesses = ["veyra_qml_ui", "veyra"];
+
+    public static string? CustomVeyraPath { get; set; }
 
     public event Action<Frame>? FrameReceived;
     public event Action<SessionState>? StateChanged;
@@ -57,7 +61,8 @@ public sealed class RemotePlayWindowStream : IStreamSession
         {
             RemotePlayApp.Sony => SonyProcesses,
             RemotePlayApp.Chiaki => ChiakiProcesses,
-            _ => [.. SonyProcesses, .. ChiakiProcesses],
+            RemotePlayApp.Veyra => VeyraProcesses,
+            _ => [.. VeyraProcesses, .. SonyProcesses, .. ChiakiProcesses],
         };
     }
 
@@ -193,7 +198,9 @@ public sealed class RemotePlayWindowStream : IStreamSession
                     {
                         RemotePlayLog.Note(selectedWindow is { } target
                             ? $"Seçilen pencere bekleniyor: {target.ProcessName} / {target.Title}"
-                            : "Remote Play penceresi bekleniyor (PS Remote Play ya da chiaki-ng)");
+                            : app == RemotePlayApp.Veyra
+                                ? "Veyra penceresi bekleniyor (veyra_qml_ui)"
+                                : "Remote Play penceresi bekleniyor (Veyra, PS Remote Play ya da chiaki-ng)");
                         noted = true;
                     }
                     Report(SessionState.Connecting);
@@ -227,7 +234,9 @@ public sealed class RemotePlayWindowStream : IStreamSession
             Report(SessionState.Disconnected(DisconnectKind.Other,
                 selectedWindow is not null
                     ? Localizer.Current["The selected window is black. Check the OBS projector or game window."]
-                    : Localizer.Current["The Remote Play window comes through black: this app may block screen capture. Try chiaki-ng."]));
+                    : app == RemotePlayApp.Veyra
+                        ? Localizer.Current["The Veyra window comes through black. Check that Veyra is actively rendering on this PC."]
+                        : Localizer.Current["The Remote Play window comes through black: this app may block screen capture. Try chiaki-ng."]));
         else
             Report(SessionState.Streaming);
     }
@@ -320,27 +329,116 @@ public sealed class RemotePlayWindowStream : IStreamSession
     /// <summary>Seçilen Remote Play uygulaması bu bilgisayarda kurulu mu ("hangisi açıksa"da ikisinden biri yeter).</summary>
     public static bool IsInstalled(RemotePlayApp app) => InstalledPath(app) is not null;
 
-    /// <summary>Seçilen uygulamanın kurulu yolu ("hangisi açıksa"da Sony önce); kurulu değilse null.</summary>
-    internal static string? InstalledPath(RemotePlayApp app)
+    /// <summary>Seçilen uygulamanın kurulu yolu ("hangisi açıksa"da varsa Veyra önce); kurulu değilse null.</summary>
+    internal static string? InstalledPath(RemotePlayApp app) => app switch
     {
-        var candidates = new List<string>();
+        RemotePlayApp.Sony => FindSonyPath(),
+        RemotePlayApp.Chiaki => FindChiakiPath(),
+        RemotePlayApp.Veyra => FindVeyraPath(),
+        _ => FindVeyraPath() ?? FindSonyPath() ?? FindChiakiPath(),
+    };
+
+    private static string? FindSonyPath()
+    {
+        var x86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+        var x64 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        string[] candidates =
+        [
+            Path.Combine(x86, "Sony", "PS Remote Play", "RemotePlay.exe"),
+            Path.Combine(x64, "Sony", "PS Remote Play", "RemotePlay.exe"),
+        ];
+        return candidates.FirstOrDefault(File.Exists);
+    }
+
+    private static string? FindChiakiPath()
+    {
         var x86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
         var x64 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        if (app != RemotePlayApp.Chiaki)
+        foreach (var root in new[] { x64, x86, Path.Combine(local, "Programs") })
         {
-            candidates.Add(Path.Combine(x86, "Sony", "PS Remote Play", "RemotePlay.exe"));
-            candidates.Add(Path.Combine(x64, "Sony", "PS Remote Play", "RemotePlay.exe"));
-        }
-        if (app != RemotePlayApp.Sony)
-        {
-            foreach (var root in new[] { x64, x86, Path.Combine(local, "Programs") })
+            foreach (var exe in new[] { "chiaki.exe", "chiaki-ng.exe" })
             {
-                candidates.Add(Path.Combine(root, "chiaki-ng", "chiaki.exe"));
-                candidates.Add(Path.Combine(root, "chiaki-ng", "chiaki-ng.exe"));
+                var path = Path.Combine(root, "chiaki-ng", exe);
+                if (File.Exists(path)) return path;
             }
         }
-        return candidates.FirstOrDefault(File.Exists);
+        return null;
+    }
+
+    internal static string? FindVeyraPath()
+    {
+        if (!string.IsNullOrWhiteSpace(CustomVeyraPath) && File.Exists(CustomVeyraPath))
+            return CustomVeyraPath;
+
+        foreach (var name in VeyraProcesses)
+        {
+            foreach (var process in Process.GetProcessesByName(name))
+            {
+                try
+                {
+                    var exePath = process.MainModule?.FileName;
+                    if (!string.IsNullOrWhiteSpace(exePath) && File.Exists(exePath)) return exePath;
+                }
+                catch (Exception) { }
+                finally { process.Dispose(); }
+            }
+        }
+
+        var roots = new[]
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs"),
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            AppContext.BaseDirectory,
+        };
+        foreach (var root in roots.Where(r => !string.IsNullOrWhiteSpace(r)))
+        {
+            foreach (var relative in new[] { Path.Combine("Veyra", "veyra_qml_ui.exe"), Path.Combine("Veyra", "veyra.exe"), "veyra_qml_ui.exe" })
+            {
+                var candidate = Path.Combine(root, relative);
+                if (File.Exists(candidate)) return candidate;
+            }
+        }
+
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var scanRoots = new[]
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+            Path.Combine(userProfile, "Downloads"),
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+        };
+        foreach (var dir in scanRoots)
+        {
+            if (FindVeyraRecursive(dir, depth: 0) is { } found) return found;
+        }
+        return null;
+    }
+
+    private static string? FindVeyraRecursive(string directory, int depth)
+    {
+        if (depth > 4 || string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory)) return null;
+        foreach (var exeName in new[] { "veyra_qml_ui.exe", "veyra.exe" })
+        {
+            var direct = Path.Combine(directory, exeName);
+            if (File.Exists(direct)) return direct;
+        }
+        if (depth == 4) return null;
+        try
+        {
+            foreach (var sub in Directory.EnumerateDirectories(directory))
+            {
+                var name = Path.GetFileName(sub);
+                if (string.IsNullOrEmpty(name) || name.StartsWith('.') || name.Equals("node_modules", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                // Masaüstü/İndirilenler içindeki ilgisiz dev klasörleri gezmemek için derinlik >= 1 iken yalnız Veyra alt ağaçlarına inilir.
+                if (depth >= 1 && !name.Contains("veyra", StringComparison.OrdinalIgnoreCase)) continue;
+                if (FindVeyraRecursive(sub, depth + 1) is { } found) return found;
+            }
+        }
+        catch (Exception) { }
+        return null;
     }
 
     /// <summary>Bir pencerenin yakalanması: Direct3D aygıtı, kare havuzu ve oturum. Kareler saniyede en çok
@@ -357,6 +455,7 @@ public sealed class RemotePlayWindowStream : IStreamSession
         private long lastFrameMs = -1000;
         private int busy;
         private int blackFrames;
+        private bool seenContent;
         private bool warnedBlack;
         private Windows.Graphics.SizeInt32 size;
         private bool disposed;
@@ -469,7 +568,8 @@ public sealed class RemotePlayWindowStream : IStreamSession
                 black = pixels[i] < 10 && pixels[i + 1] < 10 && pixels[i + 2] < 10;
             if (black)
             {
-                if (++blackFrames == BlackFramesBeforeWarning && !warnedBlack)
+                var limit = seenContent ? BlackFramesAfterContentWarning : BlackFramesBeforeWarning;
+                if (++blackFrames == limit && !warnedBlack)
                 {
                     warnedBlack = true;
                     RemotePlayLog.Note($"{Name} penceresi siyah geliyor: ekran yakalama engelleniyor olabilir");
@@ -478,6 +578,7 @@ public sealed class RemotePlayWindowStream : IStreamSession
             }
             else
             {
+                seenContent = true;
                 blackFrames = 0;
                 if (warnedBlack)
                 {

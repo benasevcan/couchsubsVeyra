@@ -22,14 +22,15 @@
                         <Button Content="{t:T 'Select'}" HorizontalAlignment="Right" Click="OnUseRemotePlayWindow" />
                     </Grid>
                     <TextBlock Style="{StaticResource HintText}" Margin="0,8,0,0" TextWrapping="Wrap"
-                               Text="{t:T 'CouchSubs reads the subtitles from PS Remote Play or chiaki-ng on this PC. No second account or PS5 pairing is needed. You can connect a TV later.'}" />
-                    <!-- İkisi de kurulu değilse resmi indirme sayfaları (ikisi de denenebilir). -->
+                               Text="{t:T 'CouchSubs reads the subtitles from Veyra, PS Remote Play, or chiaki-ng on this PC. No second account or PS5 pairing is needed. You can connect a TV later.'}" />
+                    <!-- Kurulu olan yoksa dosya seçme ve indirme düğmeleri görünür. -->
                     <StackPanel x:Name="DownloadPanel" Margin="0,12,0,0" Visibility="Collapsed">
-                        <TextBlock Style="{StaticResource HintText}" TextWrapping="Wrap" Text="{t:T 'PS Remote Play and chiaki-ng aren\'t installed on this PC.'}" />
-                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                        <TextBlock Style="{StaticResource HintText}" TextWrapping="Wrap" Text="{t:T 'Veyra, PS Remote Play, and chiaki-ng weren\'t found automatically on this PC.'}" />
+                        <WrapPanel Margin="0,8,0,0">
+                            <Button Content="{t:T 'Select Veyra…'}" Margin="0,0,8,0" Click="OnSelectVeyra" />
                             <Button Content="{t:T 'Download PS Remote Play'}" Margin="0,0,8,0" Click="OnDownloadSony" />
                             <Button Content="{t:T 'Download chiaki-ng'}" Click="OnDownloadChiaki" />
-                        </StackPanel>
+                        </WrapPanel>
                     </StackPanel>
                 </StackPanel>
             </c:Card>

@@ -625,6 +625,9 @@
     el.style.maxWidth = Math.round(Math.max(boxWidth, width * 0.3)) + 'px';
     var line = typeof data.line === 'number' && data.line > 0 ? data.line * height : 30;
     el.style.fontSize = Math.max(REGION_MIN_FONT, Math.min(REGION_MAX_FONT, Math.round(line * 0.9))) + 'px';
+    if (regionRadius !== null) el.style.borderRadius = regionRadius;
+    el.style.background = 'rgba(' + bgRgb + ', 0.9)';
+    el.style.color = $('subtitle-text').style.color || '#fff';
   }
 
   function hideRegion(id) {
@@ -762,8 +765,58 @@
     body.className = (on ? rest + name : rest).replace(/^\s+|\s+$/g, '').replace(/\s+/g, ' ');
   }
 
-  // Bilgisayardaki "Yazı rengi" seçimi; bilinmeyen değer gelirse renk değişmez.
-  var TEXT_COLORS = { white: '#FFFFFF', yellow: '#FFE135' };
+  // Bilgisayardaki "Yazı rengi", "Arka plan rengi", "Köşe yuvarlaklığı" ve "Gölge" seçimleri.
+  var TEXT_COLORS = {
+    white: '#FFFFFF',
+    yellow: '#FFE135',
+    cyan: '#22D3EE',
+    green: '#4ADE80',
+    orange: '#FB923C',
+    pink: '#F472B6',
+    lightblue: '#93C5FD'
+  };
+  var BG_RGB = { black: '0, 0, 0', darkgray: '30, 32, 36', navy: '15, 23, 42' };
+  var bgRgb = BG_RGB.black;
+  var boxRadius = null;
+  var regionRadius = null;
+
+  function resolveTextColor(style) {
+    if (style.textColor === 'custom' && typeof style.customTextColor === 'string') {
+      var hex = style.customTextColor.replace(/^\s+|\s+$/g, '');
+      if (/^#[0-9a-fA-F]{6}$|^#[0-9a-fA-F]{8}$/.test(hex)) return hex;
+    }
+    return TEXT_COLORS[style.textColor] || null;
+  }
+
+  function applyCornerRadius() {
+    var mainRadius = bandShape ? '0px' : boxRadius;
+    if (mainRadius !== null) {
+      $('subtitle-text').style.borderRadius = mainRadius;
+      $('subtitle-prev-text').style.borderRadius = mainRadius;
+      $('subtitle-prev2-text').style.borderRadius = mainRadius;
+      $('subtitle-cover').style.borderRadius = mainRadius;
+    } else if (bandShape) {
+      $('subtitle-text').style.borderRadius = '';
+      $('subtitle-prev-text').style.borderRadius = '';
+      $('subtitle-prev2-text').style.borderRadius = '';
+      $('subtitle-cover').style.borderRadius = '';
+    }
+    if (regionRadius !== null) {
+      for (var id in regionBoxes) {
+        if (Object.prototype.hasOwnProperty.call(regionBoxes, id)) regionBoxes[id].style.borderRadius = regionRadius;
+      }
+    }
+  }
+
+  function applyShadow(strength) {
+    var shadow = '';
+    if (strength === 'none') shadow = 'none';
+    else if (strength === 'strong') shadow = '0 0 6px #000, 0 3px 8px #000';
+    else if (strength === 'outline') shadow = '-1.5px -1.5px 0 #000, 1.5px -1.5px 0 #000, -1.5px 1.5px 0 #000, 1.5px 1.5px 0 #000, 0 0 4px #000';
+    $('subtitle-text').style.textShadow = shadow;
+    $('subtitle-prev-text').style.textShadow = shadow;
+    $('subtitle-prev2-text').style.textShadow = shadow;
+  }
 
   function applyStyle(style) {
     if (style.fontSize) {
@@ -777,16 +830,23 @@
     if (PLACEMENTS[style.placement]) placement = style.placement;
     bandShape = style.backgroundShape === 'band';
     setBodyClass('band', bandShape);
+    bgRgb = BG_RGB[style.backgroundColor] || BG_RGB.black;
     if (typeof style.background === 'number') {
       var alpha = Math.max(0, Math.min(100, style.background)) / 100;
       // Zemin çok saydamsa yazıya sert kontur eklenir (style.css, body.thin-bg).
       setBodyClass('thin-bg', alpha < 0.3);
-      textBackground = 'rgba(0, 0, 0, ' + alpha + ')';
-      coverBackground = style.background >= 100 ? '#000' : textBackground;
+      textBackground = 'rgba(' + bgRgb + ', ' + alpha + ')';
+      coverBackground = style.background >= 100 ? 'rgb(' + bgRgb + ')' : textBackground;
       $('subtitle-text').style.background = textBackground;
-      $('subtitle-prev-text').style.background = 'rgba(0, 0, 0, ' + (alpha * 0.83).toFixed(2) + ')';
-      $('subtitle-prev2-text').style.background = 'rgba(0, 0, 0, ' + (alpha * 0.83).toFixed(2) + ')';
+      $('subtitle-prev-text').style.background = 'rgba(' + bgRgb + ', ' + (alpha * 0.83).toFixed(2) + ')';
+      $('subtitle-prev2-text').style.background = 'rgba(' + bgRgb + ', ' + (alpha * 0.83).toFixed(2) + ')';
     }
+    if (typeof style.backgroundRadius === 'number') {
+      var clampedRadius = Math.max(0, Math.min(48, Math.round(style.backgroundRadius)));
+      boxRadius = clampedRadius + 'px';
+      regionRadius = Math.round(clampedRadius * 0.8) + 'px';
+    }
+    applyCornerRadius();
     // Ayarı göndermeyen bilgisayar (eski Windows sürümü, Mac) eski davranışı bekler: önceki satırlar üstte kalır.
     // Yoksa bir kez kapatılan ayar başka bilgisayara bağlanınca da kapalı kalırdı.
     stackPrevious = typeof style.stackPrevious === 'boolean' ? style.stackPrevious : true;
@@ -797,10 +857,18 @@
       $('subtitle-prev-text').style.fontWeight = style.bold ? '700' : '600';
       $('subtitle-prev2-text').style.fontWeight = style.bold ? '700' : '600';
     }
-    if (TEXT_COLORS[style.textColor]) {
-      $('subtitle-text').style.color = TEXT_COLORS[style.textColor];
-      $('subtitle-prev-text').style.color = TEXT_COLORS[style.textColor];
-      $('subtitle-prev2-text').style.color = TEXT_COLORS[style.textColor];
+    if (typeof style.fontFamily === 'string' && style.fontFamily.replace(/^\s+|\s+$/g, '')) {
+      var family = '"' + style.fontFamily.replace(/"/g, '') + '", sans-serif';
+      $('subtitle-text').style.fontFamily = family;
+      $('subtitle-prev-text').style.fontFamily = family;
+      $('subtitle-prev2-text').style.fontFamily = family;
+    }
+    applyShadow(style.shadowStrength);
+    var color = resolveTextColor(style);
+    if (color) {
+      $('subtitle-text').style.color = color;
+      $('subtitle-prev-text').style.color = color;
+      $('subtitle-prev2-text').style.color = color;
     }
     layout();
     if (style.bottomPercent >= 0 && String(style.bottomPercent) !== load('appBottom')) {
