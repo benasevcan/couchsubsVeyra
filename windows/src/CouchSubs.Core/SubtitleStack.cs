@@ -30,14 +30,17 @@ public sealed class SubtitleStack
     {
         /// <summary>Görünümde kullanılacak metin ve yazı boyu çarpanı: uzun çeviri en çok 3 satıra dengeli bölünür
         /// (bkz. <see cref="SubtitleWrap"/>). Görev paneli gibi satır satır yazılar olduğu gibi kalır.</summary>
-        public SubtitleWrap.Result Wrapped => Paragraphs ? new SubtitleWrap.Result(Text, 1) : SubtitleWrap.Fit(Text);
+        public SubtitleWrap.Result Wrapped => Wrap();
+
+        public SubtitleWrap.Result Wrap(int maxChars = SubtitleWrap.MaxChars) =>
+            Paragraphs ? new SubtitleWrap.Result(Text, 1) : SubtitleWrap.Fit(Text, maxChars);
     }
 
     private sealed record Current(int Id, string Text, bool Paragraphs, double ShownAt, double HideAt, double HoldUntil, TextBox? Box = null);
 
-    private sealed record Slot(int Id, string Text, double ShownAt)
+    private sealed record Slot(int Id, string Text, double ShownAt, double HoldSeconds = PreviousHold)
     {
-        public double FadeAt => ShownAt + PreviousHold;
+        public double FadeAt => ShownAt + HoldSeconds;
         public double HideAt => FadeAt + PreviousFade;
     }
 
@@ -45,6 +48,8 @@ public sealed class SubtitleStack
     public bool StackPrevious { get; set; } = true;
     /// <summary>Önceki satırların yeni satıra göre yerleşim yönü: üstte (<see cref="SubtitleStackDirection.Above"/>) ya da altta (<see cref="SubtitleStackDirection.Below"/>).</summary>
     public SubtitleStackDirection StackDirection { get; set; } = SubtitleStackDirection.Above;
+    /// <summary>Hızlı konuşmada önceki satırın tam görünür kalma süresi (saniye).</summary>
+    public double PreviousHoldSeconds { get; set; } = PreviousHold;
 
     private Current? current;
     private Slot? previous;
@@ -131,8 +136,9 @@ public sealed class SubtitleStack
     /// <summary>Önceki satır üste çıkar. Orada hâlâ tam görünen bir satır varsa o da bir üst sıraya (iki önceki) kayar.</summary>
     private void PushPrevious(string text, double now)
     {
-        older = previous is { } shown && now < shown.FadeAt && !SameLine(shown.Text, text) ? new Slot(NextId(), shown.Text, now) : null;
-        previous = new Slot(NextId(), text, now);
+        var hold = double.IsFinite(PreviousHoldSeconds) ? Math.Clamp(PreviousHoldSeconds, 0.5, 5.0) : PreviousHold;
+        older = previous is { } shown && now < shown.FadeAt && !SameLine(shown.Text, text) ? new Slot(NextId(), shown.Text, now, hold) : null;
+        previous = new Slot(NextId(), text, now, hold);
     }
 
     /// <summary>Süresi dolan satırları atar; son satır kalktıysa üsttekiler de kalkar (TV'deki hideSubtitle gibi).</summary>

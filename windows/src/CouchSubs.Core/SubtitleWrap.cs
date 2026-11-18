@@ -18,17 +18,36 @@ public static class SubtitleWrap
 
     public readonly record struct Result(string Text, double Scale);
 
-    public static Result Fit(string text)
+    public static Result Fit(string text, int maxChars = MaxChars)
     {
+        var limit = Math.Clamp(maxChars, 20, 140);
         var length = new StringInfo(text).LengthInTextElements;
-        if (length <= MaxChars || text.Contains('\n')) return new Result(text, 1);
+        if (length <= limit || text.Contains('\n')) return new Result(text, 1);
         var words = Tokens(text);
         if (words.Count < 2) return new Result(text, 1);
-        var scale = Math.Clamp((double)(MaxChars * MaxLines) / length, MinScale, 1);
-        var cap = (int)Math.Floor(MaxChars / scale);
+        var scale = Math.Clamp((double)(limit * MaxLines) / length, MinScale, 1);
+        var cap = (int)Math.Floor(limit / scale);
         var lines = Math.Min(MaxLines, Math.Max(2, (int)Math.Ceiling((double)length / cap)));
         return new Result(Balance(words, Math.Min(lines, words.Count)), scale);
     }
+
+    /// <summary>Kutu genişliği ve yazı boyutuna göre tek satıra sığacak yaklaşık karakter sınırını üst sınırla (<paramref name="maxCharsCap"/>) dengeler.</summary>
+    public static int SmartLimit(double usableWidthDip, double fontSizeDip, int maxCharsCap, bool isUpper = false, bool isMonospace = false)
+    {
+        var cap = Math.Clamp(maxCharsCap, 20, 140);
+        if (!double.IsFinite(usableWidthDip) || usableWidthDip <= 0 || !double.IsFinite(fontSizeDip) || fontSizeDip <= 0)
+            return cap;
+        var ratio = isUpper ? (isMonospace ? 0.66 : 0.62) : (isMonospace ? 0.60 : 0.49);
+        var charWidth = Math.Max(4, fontSizeDip * ratio);
+        var fit = (int)Math.Floor((usableWidthDip * 0.94) / charWidth);
+        return Math.Clamp(fit, 18, cap);
+    }
+
+    public static bool IsMonospace(string? fontFamily) =>
+        !string.IsNullOrWhiteSpace(fontFamily) &&
+        (fontFamily.Contains("Consolas", StringComparison.OrdinalIgnoreCase) ||
+         fontFamily.Contains("Courier", StringComparison.OrdinalIgnoreCase) ||
+         fontFamily.Contains("Mono", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>Sözcükler; konuşan adı ("ARTHUR:") sonraki sözcükle birleşik tutulur, ad satır sonunda tek kalmaz.</summary>
     internal static List<string> Tokens(string text)

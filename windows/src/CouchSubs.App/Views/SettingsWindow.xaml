@@ -96,7 +96,7 @@
                                     <ComboBoxItem Content="{t:T 'Right'}" Tag="Right" />
                                 </ComboBox>
                                 <TextBlock Text="{t:T 'Subtitle box width'}" Margin="0,0,0,8" />
-                                <Grid Margin="0,0,0,12">
+                                <Grid Margin="0,0,0,6">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
@@ -111,10 +111,31 @@
                                     <TextBlock x:Name="BoxWidthPercentValue" Grid.Column="3" HorizontalAlignment="Right" VerticalAlignment="Center"
                                                Typography.NumeralAlignment="Tabular" />
                                 </Grid>
+                                <TextBlock Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,0,0,12"
+                                           Text="{t:T 'The box width controls where long lines wrap and how wide the text area spans on screen.'}" />
                                 <TextBlock Style="{StaticResource HintText}" TextWrapping="Wrap"
                                            Text="{t:T 'On the computer screen, move the subtitle by dragging its window: press Adjust the subtitle window.'}" />
                                 <Button HorizontalAlignment="Left" Margin="0,8,0,0" Content="{t:T 'Adjust the subtitle window'}" Click="OnAdjustOverlay" />
                             </StackPanel>
+                            <CheckBox x:Name="SmartLineWrap" Content="{t:T 'Smart line wrapping (keep single line when it fits)'}"
+                                      Foreground="{DynamicResource textPrimaryBrush}" Margin="0,0,0,8"
+                                      Checked="OnSmartLineWrap" Unchecked="OnSmartLineWrap" />
+                            <TextBlock Text="{t:T 'Max characters per line'}" Margin="0,0,0,8" />
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="48" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="30" Style="{StaticResource HintText}" VerticalAlignment="Center" />
+                                <Slider x:Name="MaxLineChars" Grid.Column="1" Minimum="30" Maximum="110" SmallChange="1" LargeChange="5" TickFrequency="1"
+                                        IsSnapToTickEnabled="True" Margin="12,0" IsMoveToPointEnabled="True"
+                                        ValueChanged="OnMaxLineChars" PreviewMouseDown="OnPositionStart" />
+                                <TextBlock Grid.Column="2" Text="110" Style="{StaticResource HintText}" VerticalAlignment="Center" />
+                                <TextBlock x:Name="MaxLineCharsValue" Grid.Column="3" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                           Typography.NumeralAlignment="Tabular" />
+                            </Grid>
                             <TextBlock Text="{t:T 'Background'}" Margin="0,0,0,8" />
                             <Grid Margin="0,0,0,12">
                                 <Grid.ColumnDefinitions>
@@ -158,10 +179,60 @@
                             </StackPanel>
                             <TextBlock Text="{t:T 'Previous lines in fast dialogue'}" Margin="0,0,0,8" />
                             <ComboBox x:Name="PreviousLinesChoice" SelectionChanged="OnPreviousLines" Margin="0,0,0,12">
-                                <ComboBoxItem Content="{t:T 'Show above'}" Tag="Above" />
-                                <ComboBoxItem Content="{t:T 'Show below'}" Tag="Below" />
+                                <ComboBoxItem Content="{t:T 'Show previous above, new below (Default)'}" Tag="Above" />
+                                <ComboBoxItem Content="{t:T 'Show new above, previous below'}" Tag="Below" />
                                 <ComboBoxItem Content="{t:T 'Off (replace previous line)'}" Tag="Off" />
                             </ComboBox>
+                            <StackPanel x:Name="PreviousStylePanel" Margin="0,0,0,4">
+                                <TextBlock Text="{t:T 'Previous line visibility'}" Margin="0,0,0,8" />
+                                <Grid Margin="0,0,0,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="48" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{t:T 'Faint'}" Style="{StaticResource HintText}" VerticalAlignment="Center" />
+                                    <Slider x:Name="PreviousOpacity" Grid.Column="1" Minimum="35" Maximum="100" SmallChange="5" LargeChange="10" TickFrequency="5"
+                                            IsSnapToTickEnabled="True" Margin="12,0" IsMoveToPointEnabled="True"
+                                            ValueChanged="OnPreviousOpacity" />
+                                    <TextBlock Grid.Column="2" Text="{t:T 'Crisp'}" Style="{StaticResource HintText}" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="PreviousOpacityValue" Grid.Column="3" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                               Typography.NumeralAlignment="Tabular" />
+                                </Grid>
+                                <TextBlock Text="{t:T 'Previous line size'}" Margin="0,0,0,8" />
+                                <Grid Margin="0,0,0,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="48" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{t:T 'Small'}" Style="{StaticResource HintText}" VerticalAlignment="Center" />
+                                    <Slider x:Name="PreviousFontScale" Grid.Column="1" Minimum="60" Maximum="100" SmallChange="5" LargeChange="10" TickFrequency="5"
+                                            IsSnapToTickEnabled="True" Margin="12,0" IsMoveToPointEnabled="True"
+                                            ValueChanged="OnPreviousFontScale" />
+                                    <TextBlock Grid.Column="2" Text="{t:T 'Large'}" Style="{StaticResource HintText}" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="PreviousFontScaleValue" Grid.Column="3" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                               Typography.NumeralAlignment="Tabular" />
+                                </Grid>
+                                <TextBlock Text="{t:T 'Previous line duration'}" Margin="0,0,0,8" />
+                                <Grid Margin="0,0,0,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="56" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{t:T 'Short'}" Style="{StaticResource HintText}" VerticalAlignment="Center" />
+                                    <Slider x:Name="PreviousHold" Grid.Column="1" Minimum="0.5" Maximum="5.0" SmallChange="0.5" LargeChange="1.0" TickFrequency="0.5"
+                                            IsSnapToTickEnabled="True" Margin="12,0" IsMoveToPointEnabled="True"
+                                            ValueChanged="OnPreviousHold" />
+                                    <TextBlock Grid.Column="2" Text="{t:T 'Long'}" Style="{StaticResource HintText}" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="PreviousHoldValue" Grid.Column="3" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                               Typography.NumeralAlignment="Tabular" />
+                                </Grid>
+                            </StackPanel>
                             <TextBlock Text="{t:T 'Text color'}" Margin="0,0,0,8" />
                             <ComboBox x:Name="TextColor" SelectionChanged="OnTextColor" Margin="0,0,0,12">
                                 <ComboBoxItem Content="{t:T 'White'}" Tag="White" />

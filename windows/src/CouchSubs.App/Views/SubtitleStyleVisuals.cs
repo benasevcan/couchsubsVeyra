@@ -103,6 +103,68 @@ internal static class SubtitleStyleVisuals
     public static string ApplyTextCase(string text, SubtitleTextCase textCase) =>
         textCase == SubtitleTextCase.Upper ? text.ToUpper(CultureInfo.CurrentCulture) : text;
 
+    /// <summary>Aktif ve geçmiş altyazı satırları için yazı boyutu çarpanı, metin opaklığı ve arka plan koyuluk çarpanı.</summary>
+    public static (double FontFactor, double TextOpacity, double BoxAlphaFactor) ResolveLineVisual(SubtitleStack.Role role, SubtitleStyle style)
+    {
+        if (role == SubtitleStack.Role.Current) return (1.0, 1.0, 1.0);
+        var prevScale = Math.Clamp(style.PreviousFontScalePercent, 60, 100) / 100.0;
+        var prevOpacity = Math.Clamp(style.PreviousOpacityPercent, 35, 100) / 100.0;
+        if (role == SubtitleStack.Role.Previous)
+            return (prevScale, prevOpacity, Math.Clamp(0.55 + 0.45 * prevOpacity, 0.70, 1.0));
+        var olderOpacity = Math.Clamp(prevOpacity - 0.15, 0.25, 0.90);
+        return (prevScale, olderOpacity, Math.Clamp(0.45 + 0.45 * olderOpacity, 0.60, 0.95));
+    }
+
+    /// <summary>
+    /// Akıllı satır sığdırma açıksa ve metin seçili kutu genişliğine + karakter sınırına tek satırda sığıyorsa bölmeden
+    /// tek satır bırakır; sığmıyorsa kutu genişliğine uygun dengeli 2–3 satıra böler.
+    /// </summary>
+    public static SubtitleWrap.Result WrapLine(
+        SubtitleStack.Line line,
+        SubtitleStyle style,
+        double maxBoxWidthDip,
+        Thickness boxPadding,
+        Thickness borderThickness,
+        double fontSizeDip)
+    {
+        var rendered = ApplyTextCase(line.Text, style.TextCase);
+        if (line.Paragraphs || rendered.Contains('\n')) return new SubtitleWrap.Result(rendered, 1);
+        var cap = Math.Clamp(style.MaxLineChars, 20, 120);
+        if (!style.SmartLineWrap) return SubtitleWrap.Fit(rendered, cap);
+
+        var usableWidth = Math.Max(80, maxBoxWidthDip - boxPadding.Left - boxPadding.Right - borderThickness.Left - borderThickness.Right - 4);
+        if (new StringInfo(rendered).LengthInTextElements <= cap && MeasureSingleLineWidth(rendered, style, fontSizeDip) <= usableWidth)
+            return new SubtitleWrap.Result(rendered, 1);
+
+        var smartCap = SubtitleWrap.SmartLimit(usableWidth, fontSizeDip, cap, style.TextCase == SubtitleTextCase.Upper, SubtitleWrap.IsMonospace(style.FontFamily));
+        return SubtitleWrap.Fit(rendered, smartCap);
+    }
+
+    private static double MeasureSingleLineWidth(string text, SubtitleStyle style, double fontSizeDip)
+    {
+        try
+        {
+            var typeface = new Typeface(
+                ResolveFontFamily(style.FontFamily),
+                style.Italic ? FontStyles.Italic : FontStyles.Normal,
+                style.Bold ? FontWeights.Bold : FontWeights.SemiBold,
+                FontStretches.Normal);
+            var formatted = new FormattedText(
+                text,
+                CultureInfo.CurrentCulture,
+                FlowDirection.LeftToRight,
+                typeface,
+                Math.Max(1, fontSizeDip),
+                Brushes.White,
+                1.0);
+            return formatted.WidthIncludingTrailingWhitespace;
+        }
+        catch
+        {
+            return double.PositiveInfinity;
+        }
+    }
+
     public static DropShadowEffect? ResolveShadowEffect(SubtitleShadowStrength strength, double scale) => strength switch
     {
         SubtitleShadowStrength.None => null,

@@ -280,7 +280,12 @@ public class SubtitleServerTests
             BoxPadding: SubtitleBoxPadding.Spacious,
             BorderStyle: SubtitleBorderStyle.Accent,
             TextCase: SubtitleTextCase.Upper,
-            CustomBackgroundColor: "#331122"));
+            CustomBackgroundColor: "#331122",
+            SmartLineWrap: false,
+            MaxLineChars: 84,
+            PreviousOpacityPercent: 90,
+            PreviousFontScalePercent: 95,
+            PreviousHoldSeconds: 3.5));
 
         using var response = await Http.GetAsync($"http://127.0.0.1:{port}/events", HttpCompletionOption.ResponseHeadersRead);
         using var reader = new StreamReader(await response.Content.ReadAsStreamAsync());
@@ -303,6 +308,11 @@ public class SubtitleServerTests
         Assert.Contains("\"borderStyle\":\"accent\"", data);
         Assert.Contains("\"textCase\":\"upper\"", data);
         Assert.Contains("\"customBackgroundColor\":\"#331122\"", data);
+        Assert.Contains("\"smartLineWrap\":false", data);
+        Assert.Contains("\"maxLineChars\":84", data);
+        Assert.Contains("\"previousOpacityPercent\":90", data);
+        Assert.Contains("\"previousFontScalePercent\":95", data);
+        Assert.Contains("\"previousHoldSeconds\":3.5", data);
     }
 
     [Fact]

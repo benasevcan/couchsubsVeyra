@@ -219,4 +219,15 @@ public class SubtitleStackTests
         Assert.Null(lines[0].Box);
         Assert.Equal(nextBox, lines[1].Box);
     }
+
+    [Fact]
+    public void PreviousHoldSecondsControlsFadeSchedule()
+    {
+        var stack = new SubtitleStack { PreviousHoldSeconds = 3.0 };
+        stack.Show("Birinci", 8000, false, 0);
+        stack.Show("İkinci", 8000, false, 1);
+        Assert.False(stack.Lines(3.9)[0].Fading);
+        Assert.True(stack.Lines(4.1)[0].Fading);
+        Assert.Equal(["İkinci"], Texts(stack, 4.45));
+    }
 }

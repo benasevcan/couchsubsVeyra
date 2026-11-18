@@ -192,13 +192,27 @@
     return out.join('\n');
   }
 
+  function effectiveWrapLimit() {
+    var st = lastStyle || {};
+    var cap = Number(st.maxLineChars) >= 20 ? Math.min(140, Math.round(Number(st.maxLineChars))) : WRAP_MAX_CHARS;
+    if (st.smartLineWrap === false) return cap;
+    var vw = window.innerWidth || 1920;
+    var widthPct = Number(st.boxWidthPercent) >= 30 ? Math.min(100, Number(st.boxWidthPercent)) : 70;
+    var usableW = vw * (widthPct / 100) * 0.9;
+    var fontPx = Number(fixed.size || st.fontSize || 48) * (window.innerHeight || 1080) / 1080;
+    var ratio = st.textCase === 'upper' ? 0.62 : 0.49;
+    var fit = Math.floor(usableW / Math.max(4, fontPx * ratio));
+    return Math.max(18, Math.min(cap, fit));
+  }
+
   function wrapSubtitle(text) {
+    var limit = effectiveWrapLimit();
     var length = Array.from ? Array.from(text).length : text.length;
-    if (length <= WRAP_MAX_CHARS || text.indexOf('\n') >= 0) return { text: text, scale: 1 };
+    if (length <= limit || text.indexOf('\n') >= 0) return { text: text, scale: 1 };
     var words = wrapTokens(text);
     if (words.length < 2) return { text: text, scale: 1 };
-    var scale = Math.min(1, Math.max(WRAP_MIN_SCALE, WRAP_MAX_CHARS * WRAP_MAX_LINES / length));
-    var cap = Math.floor(WRAP_MAX_CHARS / scale);
+    var scale = Math.min(1, Math.max(WRAP_MIN_SCALE, limit * WRAP_MAX_LINES / length));
+    var cap = Math.floor(limit / scale);
     var lines = Math.min(WRAP_MAX_LINES, Math.max(2, Math.ceil(length / cap)));
     return { text: wrapBalance(words, Math.min(lines, words.length)), scale: scale };
   }

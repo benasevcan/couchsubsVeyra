@@ -131,20 +131,24 @@ public sealed class StreamWindow : Window
         if (e.PropertyName == nameof(AppController.StreamBackground)) ApplyBackground();
         if (e.PropertyName != nameof(AppController.Settings)) return;
         // Yazı boyu, rengi, yönü ya da konumu değişmiş olabilir; kutular yeniden kurulur.
-        var style = controller.Settings.Style;
-        stack.StackPrevious = style.StackPrevious;
-        stack.StackDirection = style.StackDirection;
+        SyncStack();
         ApplyLayout();
         boxes.Clear();
         Refresh();
     }
 
-    /// <summary>Saydam penceredekiyle aynı kurallar (bkz. <see cref="SubtitleOverlayWindow"/>).</summary>
-    private void OnEvent(SubtitleEvent e)
+    private void SyncStack()
     {
         var style = controller.Settings.Style;
         stack.StackPrevious = style.StackPrevious;
         stack.StackDirection = style.StackDirection;
+        stack.PreviousHoldSeconds = style.PreviousHoldSeconds;
+    }
+
+    /// <summary>Saydam penceredekiyle aynı kurallar (bkz. <see cref="SubtitleOverlayWindow"/>).</summary>
+    private void OnEvent(SubtitleEvent e)
+    {
+        SyncStack();
         switch (e.Kind)
         {
             case SubtitleEventKind.Subtitle:
@@ -222,34 +226,38 @@ public sealed class StreamWindow : Window
         var style = controller.Settings.Style;
         var scale = Scale;
         var current = line.Role == SubtitleStack.Role.Current;
-        var wrapped = line.Wrapped;
-        var size = Math.Max(1, OverlayPlacement.FontSize(style.FontSize) * scale * (current ? 1 : 0.8) * wrapped.Scale);
+        var (fontFactor, textOpacity, _) = SubtitleStyleVisuals.ResolveLineVisual(line.Role, style);
+        var baseSize = Math.Max(1, OverlayPlacement.FontSize(style.FontSize) * scale * fontFactor);
+        var padding = SubtitleStyleVisuals.ResolveBoxPadding(style.BoxPadding, current, scale);
+        var (borderBrush, borderThickness) = SubtitleStyleVisuals.ResolveBorder(style.BorderStyle, scale);
+        var hostW = linesHost.ActualWidth > 0 ? linesHost.ActualWidth : 1280;
+        var hostH = linesHost.ActualHeight > 0 ? linesHost.ActualHeight : 720;
+        var wrapWidth = Math.Max(160, hostW * (Math.Clamp(style.BoxWidthPercent, 30, 100) / 100.0) - 48 * scale);
+        var wrapped = SubtitleStyleVisuals.WrapLine(line, style, wrapWidth, padding, borderThickness, baseSize);
+        var size = Math.Max(1, baseSize * wrapped.Scale);
         var boxed = StreamBackgrounds.BoxOpacity(style.Background) > 0;
         var band = style.BackgroundShape == SubtitleBackgroundShape.Band;
-        var dim = line.Role switch { SubtitleStack.Role.Current => 1.0, SubtitleStack.Role.Previous => 0.6, _ => 0.45 };
         var text = new TextBlock
         {
-            Text = SubtitleStyleVisuals.ApplyTextCase(wrapped.Text, style.TextCase),
+            Text = wrapped.Text,
             FontFamily = SubtitleStyleVisuals.ResolveFontFamily(style.FontFamily),
             FontSize = size,
             FontWeight = style.Bold ? FontWeights.Bold : FontWeights.SemiBold,
             FontStyle = style.Italic ? FontStyles.Italic : FontStyles.Normal,
-            Foreground = SubtitleStyleVisuals.ResolveTextBrush(style, boxed ? dim : 1.0),
+            Foreground = SubtitleStyleVisuals.ResolveTextBrush(style, boxed ? textOpacity : 1.0),
             TextWrapping = TextWrapping.Wrap,
+            MaxWidth = band && !line.Paragraphs ? Math.Max(80, wrapWidth - padding.Left - padding.Right) : double.PositiveInfinity,
             TextAlignment = line.Paragraphs ? TextAlignment.Left : SubtitleStyleVisuals.ResolveTextAlignment(style.HorizontalAlign),
             VerticalAlignment = VerticalAlignment.Center,
             LineHeight = size * SubtitleStyleVisuals.ResolveLineHeightFactor(style.LineSpacing),
             Effect = boxed ? null : SubtitleStyleVisuals.ResolveShadowEffect(style.ShadowStrength, scale),
         };
-        var hostW = linesHost.ActualWidth > 0 ? linesHost.ActualWidth : 1280;
-        var hostH = linesHost.ActualHeight > 0 ? linesHost.ActualHeight : 720;
         var minW = boxed && !band && current && line.Box is { } s
             ? Math.Round(Math.Min(Math.Max(0, hostW - 48 * scale), Math.Clamp(s.Right - s.Left + 0.04, 0, 1) * hostW))
             : 0;
         var minH = boxed && current && line.Box is { } sh
             ? Math.Round(Math.Clamp(sh.Bottom - sh.Top + 0.016, 0, 0.35) * hostH)
             : 0;
-        var (borderBrush, borderThickness) = SubtitleStyleVisuals.ResolveBorder(style.BorderStyle, scale);
         return new Border
         {
             Background = boxed
@@ -258,7 +266,7 @@ public sealed class StreamWindow : Window
             BorderBrush = borderBrush,
             BorderThickness = borderThickness,
             CornerRadius = new CornerRadius(SubtitleStyleVisuals.ResolveCornerRadius(style, band, scale)),
-            Padding = SubtitleStyleVisuals.ResolveBoxPadding(style.BoxPadding, current, scale),
+            Padding = padding,
             Margin = new Thickness(band ? -24 * scale : 0, 7 * scale, band ? -24 * scale : 0, 7 * scale),
             MinWidth = minW,
             MinHeight = minH,

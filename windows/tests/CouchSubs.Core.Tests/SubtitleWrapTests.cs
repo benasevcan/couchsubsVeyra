@@ -49,4 +49,17 @@ public class SubtitleWrapTests
         Assert.Equal(1, line.Wrapped.Scale);
         Assert.DoesNotContain('\n', line.Wrapped.Text);
     }
+
+    [Fact]
+    public void Custom_limit_and_smart_limit_scale_with_width()
+    {
+        var text = "Şimdi John ile Micah'ı önden keşfe yolladım...";
+        Assert.Contains('\n', SubtitleWrap.Fit(text).Text);
+        Assert.Equal(text, SubtitleWrap.Fit(text, 72).Text);
+
+        var wide = SubtitleWrap.SmartLimit(1300, 36, 72);
+        var narrow = SubtitleWrap.SmartLimit(500, 36, 72);
+        Assert.True(wide >= 50 && wide <= 72);
+        Assert.True(narrow < wide);
+    }
 }

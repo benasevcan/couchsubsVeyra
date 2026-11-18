@@ -54,6 +54,9 @@ public partial class SettingsWindow : Window
         SelectByTag(HorizontalAlignChoice, settings.Style.HorizontalAlign.ToString());
         BoxWidthPercent.Value = Math.Clamp(settings.Style.BoxWidthPercent, BoxWidthPercent.Minimum, BoxWidthPercent.Maximum);
         BoxWidthPercentValue.Text = $"{(int)BoxWidthPercent.Value}%";
+        SmartLineWrap.IsChecked = settings.Style.SmartLineWrap;
+        MaxLineChars.Value = Math.Clamp(settings.Style.MaxLineChars, MaxLineChars.Minimum, MaxLineChars.Maximum);
+        MaxLineCharsValue.Text = $"{(int)MaxLineChars.Value}";
         BackgroundOpacity.Value = settings.Style.Background;
         SelectByTag(BackgroundShape, settings.Style.BackgroundShape.ToString());
         BackgroundRadius.Value = Math.Clamp(settings.Style.BackgroundRadius, BackgroundRadius.Minimum, BackgroundRadius.Maximum);
@@ -61,6 +64,13 @@ public partial class SettingsWindow : Window
         Bold.IsChecked = settings.Style.Bold;
         Italic.IsChecked = settings.Style.Italic;
         SelectByTag(PreviousLinesChoice, settings.Style.StackPrevious ? settings.Style.StackDirection.ToString() : "Off");
+        PreviousStylePanel.Visibility = settings.Style.StackPrevious ? Visibility.Visible : Visibility.Collapsed;
+        PreviousOpacity.Value = Math.Clamp(settings.Style.PreviousOpacityPercent, PreviousOpacity.Minimum, PreviousOpacity.Maximum);
+        PreviousOpacityValue.Text = $"{(int)PreviousOpacity.Value}%";
+        PreviousFontScale.Value = Math.Clamp(settings.Style.PreviousFontScalePercent, PreviousFontScale.Minimum, PreviousFontScale.Maximum);
+        PreviousFontScaleValue.Text = $"{(int)PreviousFontScale.Value}%";
+        PreviousHold.Value = Math.Clamp(settings.Style.PreviousHoldSeconds, PreviousHold.Minimum, PreviousHold.Maximum);
+        PreviousHoldValue.Text = $"{PreviousHold.Value.ToString("0.0", System.Globalization.CultureInfo.CurrentCulture)} {Localizer.Current["sec"]}";
         MisreadWait.Value = settings.MisreadWaitMs / 1000.0;
         PartialWait.Value = settings.PartialWaitMs / 1000.0;
         ShowWaits();
@@ -880,6 +890,21 @@ public partial class SettingsWindow : Window
         Update(s => s with { Overlay = null, Style = s.Style with { BoxWidthPercent = width } });
     }
 
+    private void OnSmartLineWrap(object sender, RoutedEventArgs e)
+    {
+        if (loading) return;
+        Update(s => s with { Style = s.Style with { SmartLineWrap = SmartLineWrap.IsChecked == true } });
+        controller.SendTestSubtitle();
+    }
+
+    private void OnMaxLineChars(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (loading) return;
+        var max = (int)Math.Round(e.NewValue);
+        MaxLineCharsValue.Text = $"{max}";
+        Update(s => s with { Style = s.Style with { MaxLineChars = max } });
+    }
+
     private void OnBold(object sender, RoutedEventArgs e) =>
         Update(s => s with { Style = s.Style with { Bold = Bold.IsChecked == true } });
 
@@ -889,10 +914,36 @@ public partial class SettingsWindow : Window
     private void OnPreviousLines(object sender, SelectionChangedEventArgs e)
     {
         if (loading || PreviousLinesChoice.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
-        if (tag == "Off")
+        var enabled = tag != "Off";
+        PreviousStylePanel.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
+        if (!enabled)
             Update(s => s with { Style = s.Style with { StackPrevious = false } });
         else
             Update(s => s with { Style = s.Style with { StackPrevious = true, StackDirection = Enum.Parse<SubtitleStackDirection>(tag) } });
+    }
+
+    private void OnPreviousOpacity(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (loading) return;
+        var opacity = (int)Math.Round(e.NewValue);
+        PreviousOpacityValue.Text = $"{opacity}%";
+        Update(s => s with { Style = s.Style with { PreviousOpacityPercent = opacity } });
+    }
+
+    private void OnPreviousFontScale(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (loading) return;
+        var scale = (int)Math.Round(e.NewValue);
+        PreviousFontScaleValue.Text = $"{scale}%";
+        Update(s => s with { Style = s.Style with { PreviousFontScalePercent = scale } });
+    }
+
+    private void OnPreviousHold(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (loading) return;
+        var hold = Math.Round(e.NewValue * 2, MidpointRounding.AwayFromZero) / 2.0;
+        PreviousHoldValue.Text = $"{hold.ToString("0.0", System.Globalization.CultureInfo.CurrentCulture)} {Localizer.Current["sec"]}";
+        Update(s => s with { Style = s.Style with { PreviousHoldSeconds = hold } });
     }
 
     private void OnMisreadWait(object sender, RoutedPropertyChangedEventArgs<double> e)

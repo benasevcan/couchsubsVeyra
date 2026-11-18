@@ -128,9 +128,7 @@ public sealed partial class SubtitleOverlayWindow : Window
             // Yazı boyu, rengi, yönü ya da konumu değişmiş olabilir; kutular yeniden kurulur.
             if (e.PropertyName == nameof(AppController.Settings))
             {
-                var style = controller.Settings.Style;
-                stack.StackPrevious = style.StackPrevious;
-                stack.StackDirection = style.StackDirection;
+                SyncStack();
                 boxes.Clear();
             }
             ApplyClickThrough();
@@ -140,11 +138,17 @@ public sealed partial class SubtitleOverlayWindow : Window
         });
     }
 
-    private void OnEvent(SubtitleEvent e) => Guard("altyazı", () =>
+    private void SyncStack()
     {
         var style = controller.Settings.Style;
         stack.StackPrevious = style.StackPrevious;
         stack.StackDirection = style.StackDirection;
+        stack.PreviousHoldSeconds = style.PreviousHoldSeconds;
+    }
+
+    private void OnEvent(SubtitleEvent e) => Guard("altyazı", () =>
+    {
+        SyncStack();
         switch (e.Kind)
         {
             case SubtitleEventKind.Subtitle:
@@ -275,40 +279,44 @@ public sealed partial class SubtitleOverlayWindow : Window
         var style = controller.Settings.Style;
         var scale = Scale;
         var current = line.Role == SubtitleStack.Role.Current;
-        // Satır yüksekliği sıfır olursa WPF hata verir; boy en az 1.
-        // Uzun çeviri en çok 3 satıra dengeli bölünür; 3 satıra sığmazsa yazı biraz küçülür (bkz. SubtitleWrap).
-        var wrapped = line.Wrapped;
-        var size = Math.Max(1, OverlayPlacement.FontSize(style.FontSize) * scale * (current ? 1 : 0.8) * wrapped.Scale);
-        var alpha = Math.Clamp(style.Background, 0, 100) / 100.0 * (current ? 1 : 0.83);
+        var (fontFactor, textOpacity, boxAlphaFactor) = SubtitleStyleVisuals.ResolveLineVisual(line.Role, style);
+        var baseSize = Math.Max(1, OverlayPlacement.FontSize(style.FontSize) * scale * fontFactor);
+        var padding = SubtitleStyleVisuals.ResolveBoxPadding(style.BoxPadding, current, scale);
+        var (borderBrush, borderThickness) = SubtitleStyleVisuals.ResolveBorder(style.BorderStyle, scale);
+        var workWidth = SystemParameters.WorkArea.Width;
+        var wrapWidth = Math.Max(160, (controller.Settings.Overlay is { } saved ? saved.Width : workWidth * (Math.Clamp(style.BoxWidthPercent, 30, 100) / 100.0)) - 48 * scale);
+        var wrapped = SubtitleStyleVisuals.WrapLine(line, style, wrapWidth, padding, borderThickness, baseSize);
+        var size = Math.Max(1, baseSize * wrapped.Scale);
+        var alpha = Math.Clamp(style.Background, 0, 100) / 100.0 * boxAlphaFactor;
         // Bant: kutu pencerenin tüm genişliğini kaplar, oyundaki İngilizce yazıyı yan yana da gizler.
         var band = style.BackgroundShape == SubtitleBackgroundShape.Band;
         var text = new TextBlock
         {
-            Text = SubtitleStyleVisuals.ApplyTextCase(wrapped.Text, style.TextCase),
+            Text = wrapped.Text,
             FontFamily = SubtitleStyleVisuals.ResolveFontFamily(style.FontFamily),
             FontSize = size,
             FontWeight = style.Bold ? FontWeights.Bold : FontWeights.SemiBold,
             FontStyle = style.Italic ? FontStyles.Italic : FontStyles.Normal,
-            Foreground = SubtitleStyleVisuals.ResolveTextBrush(style),
+            Foreground = SubtitleStyleVisuals.ResolveTextBrush(style, textOpacity),
             TextWrapping = TextWrapping.Wrap,
+            MaxWidth = band && !line.Paragraphs ? Math.Max(80, wrapWidth - padding.Left - padding.Right) : double.PositiveInfinity,
             TextAlignment = line.Paragraphs ? TextAlignment.Left : SubtitleStyleVisuals.ResolveTextAlignment(style.HorizontalAlign),
             VerticalAlignment = VerticalAlignment.Center,
             LineHeight = size * SubtitleStyleVisuals.ResolveLineHeightFactor(style.LineSpacing),
             Effect = SubtitleStyleVisuals.ResolveShadowEffect(style.ShadowStrength, scale),
         };
-        var (borderBrush, borderThickness) = SubtitleStyleVisuals.ResolveBorder(style.BorderStyle, scale);
         return new Border
         {
             Background = new SolidColorBrush(SubtitleStyleVisuals.ResolveBackgroundColor(style, (byte)Math.Round(alpha * 255))),
             BorderBrush = borderBrush,
             BorderThickness = borderThickness,
             CornerRadius = new CornerRadius(SubtitleStyleVisuals.ResolveCornerRadius(style, band, scale)),
-            Padding = SubtitleStyleVisuals.ResolveBoxPadding(style.BoxPadding, current, scale),
+            Padding = padding,
             Margin = new Thickness(band ? -24 * scale : 0, 7 * scale, band ? -24 * scale : 0, 7 * scale),
             MinWidth = current ? cover.MinBoxWidth : 0,
             MinHeight = current ? cover.MinBoxHeight : 0,
             HorizontalAlignment = band ? HorizontalAlignment.Stretch : SubtitleStyleVisuals.ResolveHorizontalAlignment(style.HorizontalAlign),
-            Opacity = line.Role switch { SubtitleStack.Role.Current => 1, SubtitleStack.Role.Previous => 0.6, _ => 0.45 },
+            Opacity = 1,
             Child = text,
         };
     }

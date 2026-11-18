@@ -32,6 +32,10 @@
   var STACK_WITHIN_MS = 1500;
   var PREVIOUS_HOLD_MS = 1500;
   var PREVIOUS_FADE_MS = 400;
+  var wrapMaxChars = 72;
+  var smartLineWrap = true;
+  var prevFontScale = 0.85;
+  var prevTextOpacity = 0.8;
   // Yeni satırla yer değiştirmedikçe hiçbir satır bundan kısa görünmez.
   var MIN_VISIBLE_MS = 1200;
   var shownAt = 0;
@@ -360,13 +364,24 @@
     return out.join('\n');
   }
 
+  function effectiveWrapLimit() {
+    var cap = wrapMaxChars >= 20 ? Math.min(140, wrapMaxChars) : WRAP_MAX_CHARS;
+    if (!smartLineWrap) return cap;
+    var vw = window.innerWidth || 1920;
+    var usableW = vw * 0.78;
+    var charWidth = Math.max(4, (fontBase || 48) * 0.5);
+    var fit = Math.floor(usableW / charWidth);
+    return Math.max(18, Math.min(cap, fit));
+  }
+
   function wrapSubtitle(text) {
+    var limit = effectiveWrapLimit();
     var length = Array.from ? Array.from(text).length : text.length;
-    if (length <= WRAP_MAX_CHARS || text.indexOf('\n') >= 0) return { text: text, scale: 1 };
+    if (length <= limit || text.indexOf('\n') >= 0) return { text: text, scale: 1 };
     var words = wrapTokens(text);
     if (words.length < 2) return { text: text, scale: 1 };
-    var scale = Math.min(1, Math.max(WRAP_MIN_SCALE, WRAP_MAX_CHARS * WRAP_MAX_LINES / length));
-    var cap = Math.floor(WRAP_MAX_CHARS / scale);
+    var scale = Math.min(1, Math.max(WRAP_MIN_SCALE, limit * WRAP_MAX_LINES / length));
+    var cap = Math.floor(limit / scale);
     var lines = Math.min(WRAP_MAX_LINES, Math.max(2, Math.ceil(length / cap)));
     return { text: wrapBalance(words, Math.min(lines, words.length)), scale: scale };
   }
@@ -819,14 +834,24 @@
   }
 
   function applyStyle(style) {
+    if (typeof style.maxLineChars === 'number' && style.maxLineChars >= 20) wrapMaxChars = Math.round(style.maxLineChars);
+    if (typeof style.smartLineWrap === 'boolean') smartLineWrap = style.smartLineWrap;
+    if (typeof style.previousHoldSeconds === 'number' && style.previousHoldSeconds >= 0.5)
+      PREVIOUS_HOLD_MS = Math.round(style.previousHoldSeconds * 1000);
+    if (typeof style.previousFontScalePercent === 'number' && style.previousFontScalePercent >= 60)
+      prevFontScale = style.previousFontScalePercent / 100;
+    if (typeof style.previousOpacityPercent === 'number' && style.previousOpacityPercent >= 35)
+      prevTextOpacity = style.previousOpacityPercent / 100;
     if (style.fontSize) {
       fontBase = style.fontSize;
       var shown = rawText('subtitle-text');
       if ($('subtitle-text').rawText !== undefined && shown) setLineText('subtitle-text', shown, !!shownParagraphs, fontBase);
       else $('subtitle-text').style.fontSize = style.fontSize + 'px';
-      $('subtitle-prev-text').style.fontSize = Math.round(style.fontSize * 0.8) + 'px';
-      $('subtitle-prev2-text').style.fontSize = Math.round(style.fontSize * 0.8) + 'px';
+      $('subtitle-prev-text').style.fontSize = Math.round(style.fontSize * prevFontScale) + 'px';
+      $('subtitle-prev2-text').style.fontSize = Math.round(style.fontSize * prevFontScale) + 'px';
     }
+    $('subtitle-prev').style.opacity = String(prevTextOpacity);
+    $('subtitle-prev2').style.opacity = String(Math.max(0.25, prevTextOpacity - 0.15));
     if (PLACEMENTS[style.placement]) placement = style.placement;
     bandShape = style.backgroundShape === 'band';
     setBodyClass('band', bandShape);

@@ -66,7 +66,12 @@ public sealed record SubtitleStyle(
     SubtitleBoxPadding BoxPadding = SubtitleBoxPadding.Normal,
     SubtitleBorderStyle BorderStyle = SubtitleBorderStyle.None,
     SubtitleTextCase TextCase = SubtitleTextCase.Normal,
-    string CustomBackgroundColor = "#000000");
+    string CustomBackgroundColor = "#000000",
+    bool SmartLineWrap = true,
+    int MaxLineChars = 72,
+    int PreviousOpacityPercent = 80,
+    int PreviousFontScalePercent = 85,
+    double PreviousHoldSeconds = 1.5);
 
 /// <summary>Hızlı konuşmada önceki satırların yeni satıra göre konumu.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter<SubtitleStackDirection>))]
@@ -592,9 +597,14 @@ public sealed class SubtitleServer(int port = 8787, TimeSpan? pingInterval = nul
             ["horizontalAlign"] = style.HorizontalAlign.ToString().ToLowerInvariant(),
             ["italic"] = style.Italic,
             ["lineSpacing"] = style.LineSpacing.ToString().ToLowerInvariant(),
+            ["maxLineChars"] = Math.Clamp(style.MaxLineChars, 20, 120),
             ["placement"] = style.Placement.ToString().ToLowerInvariant(),
             ["positionAnchor"] = style.PositionAnchor.ToString().ToLowerInvariant(),
+            ["previousFontScalePercent"] = Math.Clamp(style.PreviousFontScalePercent, 60, 100),
+            ["previousHoldSeconds"] = Math.Round(Math.Clamp(style.PreviousHoldSeconds, 0.5, 5.0), 1),
+            ["previousOpacityPercent"] = Math.Clamp(style.PreviousOpacityPercent, 35, 100),
             ["shadowStrength"] = style.ShadowStrength.ToString().ToLowerInvariant(),
+            ["smartLineWrap"] = style.SmartLineWrap,
             ["stackDirection"] = style.StackDirection.ToString().ToLowerInvariant(),
             ["stackPrevious"] = style.StackPrevious,
             ["textCase"] = style.TextCase.ToString().ToLowerInvariant(),
