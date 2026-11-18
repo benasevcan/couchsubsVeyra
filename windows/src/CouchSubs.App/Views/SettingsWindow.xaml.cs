@@ -95,7 +95,7 @@ public partial class SettingsWindow : Window
             .FirstOrDefault(item => (int)item.Tag == CpuThreadOptions.Normalize(settings.CpuTranslationThreads, Environment.ProcessorCount))
             ?? CpuThreadChoice.Items[0];
         FastSubtitleDetection.IsChecked = settings.FastSubtitleDetection;
-        OcrEngineChoice.SelectedItem = OcrEngineChoice.Items.Cast<ComboBoxItem>().First(item => (string)item.Tag == settings.OcrEngine.ToString());
+        SelectByTag(OcrEngineChoice, settings.OcrEngine.ToString());
         ShowAdvancedOcr();
         ShowCpuThreads();
         ShowEngine();
@@ -603,6 +603,7 @@ public partial class SettingsWindow : Window
 
     private void OnOcrEngine(object sender, SelectionChangedEventArgs e)
     {
+        if (loading) return;
         if (OcrEngineChoice.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
         var engine = Enum.Parse<OcrEngine>(tag);
         if (controller.Settings.OcrEngine == engine) return;
