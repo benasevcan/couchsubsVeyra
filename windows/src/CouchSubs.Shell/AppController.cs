@@ -69,7 +69,6 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     private SubtitlePipeline? pipeline;
     /// <summary>Hattın yazı okuyucusu; ek bölgelerin tek seferlik okuması da bunu kullanır.</summary>
     private ITextReader? activeReader;
-    private ITextReader? adHocReader;
     private int extraBusy;
     private bool subtitlesPaused;
     /// <summary>Oyundaki altyazının son görüldüğü yer; deneme altyazısı TV'de oraya yerleşir.</summary>
@@ -436,8 +435,6 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                                      || old.AiInstruction != value.AiInstruction
                                      || old.TranslationDevice != value.TranslationDevice
                                      || old.CpuTranslationThreads != value.CpuTranslationThreads;
-            if (old.SourceLanguage != value.SourceLanguage || old.OcrEngine != value.OcrEngine)
-                adHocReader = null;
             if (translationChanged && !isRunning) RefreshTranslatorStatus();
             if (isRunning && (old.SourceLanguage != value.SourceLanguage || old.TargetLanguage != value.TargetLanguage
                               || translationChanged || old.FastSubtitleDetection != value.FastSubtitleDetection
@@ -1096,19 +1093,16 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     }
 
     /// <summary>
-    /// Serbest alan (Num 5 veya fareyle seçim): verilen karedeki alanı bir kez okuyup çevirir. Çeviri durdurulmuş
-    /// olsa bile seçili okuyucu ve çevirmenle çalışır; sonuç bilgisayarda doğrudan gösterilmek üzere döner.
+    /// Serbest alan (Num 5): verilen karedeki alanı bir kez okuyup çevirir. Sonuç, ayardaki hedefe göre TV'ye de gönderilir;
+    /// bilgisayarda gösterilmek üzere her durumda döner (serbest alan penceresi kendisi gösterir).
     /// </summary>
     public Task<(ExtraRegionOutcome Outcome, RegionTranslation.Result? Result)> TranslateAreaAsync(Frame frame, CropRegion region) =>
-        RunRegionAsync(frame, region, settings.FreeAreaTarget != ResultTarget.Pc && ShowsOnTv && isRunning, false, allowIdle: true);
+        RunRegionAsync(frame, region, settings.FreeAreaTarget != ResultTarget.Pc && ShowsOnTv, false);
 
-    private async Task<(ExtraRegionOutcome Outcome, RegionTranslation.Result? Result)> RunRegionAsync(
-        Frame frame, CropRegion region, bool toTv, bool toPcPopup, bool allowIdle = false)
+    private async Task<(ExtraRegionOutcome Outcome, RegionTranslation.Result? Result)> RunRegionAsync(Frame frame, CropRegion region, bool toTv, bool toPcPopup)
     {
-        if (!allowIdle && !isRunning) return (ExtraRegionOutcome.NotRunning, null);
-        var reader = activeReader ?? (allowIdle ? (adHocReader ??= services.MakeReader(settings.SourceLanguage, settings.OcrEngine)) : null);
-        if (reader is null)
-            return (allowIdle ? ExtraRegionOutcome.TranslatorUnavailable : ExtraRegionOutcome.NotRunning, null);
+        var reader = activeReader;
+        if (!isRunning || reader is null) return (ExtraRegionOutcome.NotRunning, null);
         // Tuşa üst üste basılınca ikinci bir okuma başlamaz.
         if (Interlocked.Exchange(ref extraBusy, 1) == 1) return (ExtraRegionOutcome.Busy, null);
         try
@@ -1967,7 +1961,6 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         // Eski hatta süren okuma beklenmez; yeni hat ilk karesini hemen alır.
         frameGate.Reset();
         ActiveSourceLanguage = settings.SourceLanguage;
-        adHocReader = null;
         var reader = services.MakeReader(settings.SourceLanguage, settings.OcrEngine);
         activeReader = reader;
         // Gelişmiş yazı tanıma Windows'un dil paketine gerek duymaz.

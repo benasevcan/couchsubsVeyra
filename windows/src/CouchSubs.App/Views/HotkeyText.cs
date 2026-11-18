@@ -34,7 +34,7 @@ internal static class HotkeyText
     public static string Name(HotkeyAction action) => Localizer.Current[action switch
     {
         HotkeyAction.Screen => "Translate the screen",
-        HotkeyAction.FreeArea => "Free area",
+        HotkeyAction.FreeArea => "Select region with mouse to translate",
         HotkeyAction.ExtraRegion1 => "Translate area 1",
         HotkeyAction.ExtraRegion2 => "Translate area 2",
         HotkeyAction.ExtraRegion3 => "Translate area 3",

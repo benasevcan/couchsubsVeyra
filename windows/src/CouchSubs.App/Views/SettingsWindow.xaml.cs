@@ -16,7 +16,7 @@ using Microsoft.Win32;
 namespace CouchSubs.App.Views;
 
 /// <summary>Ayarların doğrudan açılabilen bölümleri.</summary>
-public enum SettingsSection { Appearance, Translation }
+public enum SettingsSection { Appearance, Translation, Shortcuts }
 
 public partial class SettingsWindow : Window
 {
@@ -793,6 +793,7 @@ public partial class SettingsWindow : Window
         window.Sections.SelectedItem = section switch
         {
             SettingsSection.Translation => window.TranslationSection,
+            SettingsSection.Shortcuts => window.ShortcutsTab,
             _ => window.Sections.SelectedItem,
         };
     }
@@ -1327,9 +1328,9 @@ public partial class SettingsWindow : Window
         ScreenCard.Title = HotkeyText.Title(settings, HotkeyAction.Screen, "Translate the screen (%@)");
         ScreenHint.Text = HotkeyText.Sentence(settings, HotkeyAction.Screen,
             "Press %@ while playing: every text on the screen is translated once and shown on the TV in its own place. Press again to remove the translations.");
-        FreeAreaCard.Title = HotkeyText.Title(settings, HotkeyAction.FreeArea, "Free area (%@)");
+        FreeAreaCard.Title = HotkeyText.Title(settings, HotkeyAction.FreeArea, "Select region with mouse (%@)");
         FreeAreaHint.Text = HotkeyText.Sentence(settings, HotkeyAction.FreeArea,
-            "Press %@ while playing: the picture freezes on the PC, drag over any part of it to translate that part once. Esc closes.");
+            "While translating is running, press %@ or use the Select region button: the frame freezes so you can drag over any text to translate. Esc closes.");
         PauseHint.Text = HotkeyText.Sentence(settings, HotkeyAction.PauseSubtitles,
             "%@ pauses or resumes the live subtitle translation, which helps when you translate areas.");
         ShowAreaHint();

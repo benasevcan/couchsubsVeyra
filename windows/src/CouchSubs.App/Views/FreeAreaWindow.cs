@@ -36,7 +36,7 @@ public sealed class FreeAreaWindow : Window
     /// <summary>Her seçim yeni numara alır; eski seçimin geç gelen sonucu yenisini ezmez.</summary>
     private int version;
 
-    /// <summary>Pencereyi açar; canlı kare yoksa masaüstünden anlık görüntü alır.</summary>
+    /// <summary>Pencereyi açar; zaten açıksa öne getirir. Çeviri başlamadıysa ya da henüz kare yoksa açılmaz.</summary>
     public static void Open(AppController controller)
     {
         if (current is not null)
@@ -44,80 +44,24 @@ public sealed class FreeAreaWindow : Window
             current.Activate();
             return;
         }
-        var frame = controller.LastFrame ?? ScreenSnapshot.CaptureMonitor(Application.Current?.MainWindow)?.Frame;
-        if (frame is null) return;
-        current = new FreeAreaWindow(controller, frame, null, null);
+        if (!controller.IsRunning || controller.LastFrame is not { } frame) return;
+        current = new FreeAreaWindow(controller, frame);
         current.Show();
         current.Activate();
     }
 
-    /// <summary>Ana ekrandaki düğmeden çağrılır: çeviri durdurulmuşsa pencereyi gizleyip masaüstünü yakalar.</summary>
-    public static async Task OpenFromDesktopAsync(AppController controller, Window? owner)
-    {
-        if (current is not null)
-        {
-            current.Activate();
-            return;
-        }
-        if (controller.IsRunning && controller.LastFrame is { } runningFrame)
-        {
-            current = new FreeAreaWindow(controller, runningFrame, null, null);
-            current.Show();
-            current.Activate();
-            return;
-        }
-
-        double previousOpacity = 1;
-        if (owner is not null)
-        {
-            previousOpacity = owner.Opacity;
-            owner.Opacity = 0;
-            await Task.Delay(140);
-        }
-        var shot = ScreenSnapshot.CaptureMonitor(owner);
-        if (shot is null)
-        {
-            if (owner is not null) owner.Opacity = previousOpacity;
-            return;
-        }
-        current = new FreeAreaWindow(controller, shot.Frame, shot, () =>
-        {
-            if (owner is not null && owner.IsLoaded)
-            {
-                owner.Opacity = previousOpacity;
-                owner.Activate();
-            }
-        });
-        current.Show();
-        current.Activate();
-    }
-
-    private FreeAreaWindow(AppController controller, Frame frame, ScreenSnapshot.Capture? shot, Action? onClose)
+    private FreeAreaWindow(AppController controller, Frame frame)
     {
         this.controller = controller;
         this.frame = frame;
         Title = "CouchSubs";
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
+        WindowState = WindowState.Maximized;
         Topmost = true;
         ShowInTaskbar = false;
         Background = Brushes.Black;
         Cursor = Cursors.Cross;
-        if (shot is not null)
-        {
-            WindowStartupLocation = WindowStartupLocation.Manual;
-            var source = Application.Current?.MainWindow is { } mw ? PresentationSource.FromVisual(mw) : null;
-            var dpiX = source?.CompositionTarget?.TransformFromDevice.M11 ?? 1.0;
-            var dpiY = source?.CompositionTarget?.TransformFromDevice.M22 ?? 1.0;
-            Left = shot.PixelLeft * dpiX;
-            Top = shot.PixelTop * dpiY;
-            Width = shot.PixelWidth * dpiX;
-            Height = shot.PixelHeight * dpiY;
-        }
-        else
-        {
-            WindowState = WindowState.Maximized;
-        }
         // Başka bir üstte duran pencere öne gelirse seçim ekranı yeniden en üste konur (kapanınca kanca kalkar).
         _ = new TopmostKeeper(this);
 
@@ -248,7 +192,7 @@ public sealed class FreeAreaWindow : Window
         Closed += (_, _) =>
         {
             current = null;
-            onClose?.Invoke();
+            Keyboard.ClearFocus();
         };
     }
 

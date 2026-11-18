@@ -75,10 +75,11 @@
                         </Button.Style>
                     </Button>
 
-                    <!-- Fareyle ekrandan bölge seçip çevirme (çeviri kapalıyken bile çalışır) -->
-                    <Button HorizontalAlignment="Stretch" Margin="0,8,0,0" Style="{StaticResource SecondaryButton}"
+                    <!-- Fareyle ekrandan bölge seçip çevirme (yalnız Çeviriyi başlat'a basıldıktan sonra etkindir) -->
+                    <Button x:Name="FreeAreaButton" HorizontalAlignment="Stretch" Margin="0,8,0,0" Focusable="False"
+                            Style="{StaticResource SecondaryButton}"
                             Content="{t:T 'Select region with mouse to translate'}"
-                            ToolTip="{t:T 'Captures screen so you can drag over any text to translate (also Num 5 while running)'}"
+                            ToolTip="{t:T 'Start translating first, then click or press your shortcut to drag over any text to translate.'}"
                             Click="OnFreeArea" />
 
                     <!-- Durum karoları -->
@@ -143,11 +144,22 @@
                                     </DockPanel>
                                 </Button>
                                 <Border Style="{StaticResource InfoDivider}" />
-                                <DockPanel Style="{StaticResource InfoRow}">
-                                    <TextBlock Text="{t:T 'Translate screen'}" Style="{StaticResource InfoRowLabel}" />
-                                    <!-- Ayarlar › Kısayollar'da seçili tuşlar, her biri bir tuş; kısayol yoksa "kısayol yok" (ShowScreenKeys). -->
-                                    <StackPanel x:Name="ScreenKeys" DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" />
-                                </DockPanel>
+                                <Button Style="{StaticResource InfoRowButton}" Click="OnShortcutSettings"
+                                        AutomationProperties.Name="{t:T 'Translate screen'}">
+                                    <DockPanel>
+                                        <!-- Ayarlar › Kısayollar'da seçili tuşlar, her biri bir tuş; kısayol yoksa "kısayol yok" (ShowShortcutKeys). -->
+                                        <StackPanel x:Name="ScreenKeys" DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" />
+                                        <TextBlock Text="{t:T 'Translate screen'}" Style="{StaticResource InfoRowLabel}" TextWrapping="Wrap" Margin="0,0,8,0" />
+                                    </DockPanel>
+                                </Button>
+                                <Border Style="{StaticResource InfoDivider}" />
+                                <Button Style="{StaticResource InfoRowButton}" Click="OnShortcutSettings"
+                                        AutomationProperties.Name="{t:T 'Select region with mouse to translate'}">
+                                    <DockPanel>
+                                        <StackPanel x:Name="FreeAreaKeys" DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" />
+                                        <TextBlock Text="{t:T 'Select region with mouse to translate'}" Style="{StaticResource InfoRowLabel}" TextWrapping="Wrap" Margin="0,0,8,0" />
+                                    </DockPanel>
+                                </Button>
                             </StackPanel>
                         </c:Card>
                     </Grid>

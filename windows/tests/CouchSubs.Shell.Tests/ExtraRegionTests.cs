@@ -117,15 +117,12 @@ public class ExtraRegionTests
         Assert.Equal(ResultTarget.Tv, new UserSettings().FreeAreaTarget);
 
     [Fact]
-    public async Task FreeAreaTranslatesEvenWhileTranslationIsStopped()
+    public async Task FreeAreaDoesNothingWhileTranslationIsStopped()
     {
-        var (controller, services) = Ready();
-        services.ReaderLines = new Reading([new TextLine("Open the door", new TextBox(0.1, 0.2, 0.9, 0.3))]);
-        var (outcome, result) = await controller.TranslateAreaAsync(Frame.Blank(64, 64), new CropRegion(0.1, 0.4, 0.1, 0.9));
-        Assert.Equal(ExtraRegionOutcome.Shown, outcome);
-        Assert.NotNull(result);
-        Assert.Equal("Open the door", result.Source);
-        Assert.NotEqual("", result.Translation);
+        var (controller, _) = Ready();
+        var (outcome, result) = await controller.TranslateAreaAsync(Frame.Blank(64, 64), new CropRegion());
+        Assert.Equal(ExtraRegionOutcome.NotRunning, outcome);
+        Assert.Null(result);
     }
 
     [Fact]

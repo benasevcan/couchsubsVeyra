@@ -49,7 +49,8 @@ public partial class MainView : UserControl
     private void OnChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(AppController.IsRunning) or nameof(AppController.TranslatorStatus) or nameof(AppController.ModelInstalled)
-            or nameof(AppController.OnlineIssue) or nameof(AppController.CanStart) or nameof(AppController.IsStarting))
+            or nameof(AppController.OnlineIssue) or nameof(AppController.CanStart) or nameof(AppController.IsStarting)
+            or nameof(AppController.LastFrame))
             Refresh();
         if (e.PropertyName is nameof(AppController.Settings) or nameof(AppController.InstalledPacks))
             ShowTiles();
@@ -88,7 +89,8 @@ public partial class MainView : UserControl
     {
         var text = Localizer.Current;
         var settings = controller.Settings;
-        ShowScreenKeys(settings);
+        ShowShortcutKeys(ScreenKeys, settings, HotkeyAction.Screen, "Translate the screen (%@)");
+        ShowShortcutKeys(FreeAreaKeys, settings, HotkeyAction.FreeArea, "Select region with mouse (%@)");
         EngineText.Text = settings.Engine == TranslationEngine.Free ? text["Free"] : settings.Engine.DisplayName();
         var packs = controller.InstalledPacks.Count;
         var active = settings.GamePacks && settings.SourceLanguage == "en" && settings.TargetLanguage == "tr" && packs > 0;
@@ -96,19 +98,16 @@ public partial class MainView : UserControl
         PackText.Text = text.Format("Game packs are on · %lld games translated in advance", packs);
     }
 
-    /// <summary>
-    /// Bilgi karosunun "Ekranı çevir" satırı: Ayarlar › Kısayollar'da seçili her tuş bir Keycap, aralarında "ya da".
-    /// Hiç kısayol yoksa "kısayol yok" yazar. Kısayol değişince Settings bildirimiyle yeniden kurulur.
-    /// </summary>
-    private void ShowScreenKeys(UserSettings settings)
+    /// <summary>Bilgi karosunun kısayol satırı: Ayarlar › Kısayollar'da seçili her tuş bir Keycap, aralarında "ya da".</summary>
+    private void ShowShortcutKeys(StackPanel panel, UserSettings settings, HotkeyAction action, string tooltipFormat)
     {
         var text = Localizer.Current;
-        var keys = HotkeyTable.KeysFor(settings.Hotkeys, HotkeyAction.Screen);
-        ScreenKeys.Children.Clear();
-        ScreenKeys.ToolTip = HotkeyText.Title(settings, HotkeyAction.Screen, "Translate the screen (%@)");
+        var keys = HotkeyTable.KeysFor(settings.Hotkeys, action);
+        panel.Children.Clear();
+        panel.ToolTip = HotkeyText.Title(settings, action, tooltipFormat);
         if (keys.Count == 0)
         {
-            ScreenKeys.Children.Add(new TextBlock
+            panel.Children.Add(new TextBlock
             {
                 Text = text["no shortcut"], Style = (Style)FindResource("CaptionText"),
                 VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.NoWrap,
@@ -118,14 +117,14 @@ public partial class MainView : UserControl
         for (var index = 0; index < keys.Count; index++)
         {
             if (index > 0)
-                ScreenKeys.Children.Add(new TextBlock
+                panel.Children.Add(new TextBlock
                 {
                     Text = text["or"], Style = (Style)FindResource("CaptionText"), Margin = new Thickness(8, 0, 8, 0),
                     VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.NoWrap,
                 });
             var label = new TextBlock { Text = keys[index].Label, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.NoWrap };
             System.Windows.Documents.Typography.SetNumeralAlignment(label, FontNumeralAlignment.Tabular);
-            ScreenKeys.Children.Add(new Border { Style = (Style)FindResource("Keycap"), Child = label });
+            panel.Children.Add(new Border { Style = (Style)FindResource("Keycap"), Child = label });
         }
     }
 
@@ -139,6 +138,7 @@ public partial class MainView : UserControl
         ToggleText.Text = Localizer.Current[running ? "Stop translating" : "Start translating"];
         // Altyazının gideceği bir yer yoksa (TV seçili ama bağlı değil) çeviri başlatılamaz.
         Toggle.IsEnabled = !controller.IsStarting && (running || controller.CanStart);
+        FreeAreaButton.IsEnabled = running && controller.LastFrame is not null;
         ModelCard.Visibility = controller.ModelInstalled ? Visibility.Collapsed : Visibility.Visible;
         EngineCard.Visibility = controller.TranslatorStatus == TranslatorStatus.EngineFailed ? Visibility.Visible : Visibility.Collapsed;
         // Çevrimiçi motor çeviremiyor; satırlar bu arada cihaz üstü modelle geliyor.
@@ -174,6 +174,9 @@ public partial class MainView : UserControl
 
     private void OnTranslationSettings(object sender, RoutedEventArgs e) =>
         SettingsWindow.Open(Window.GetWindow(this), controller, SettingsSection.Translation);
+
+    private void OnShortcutSettings(object sender, RoutedEventArgs e) =>
+        SettingsWindow.Open(Window.GetWindow(this), controller, SettingsSection.Shortcuts);
 
     /// <summary>Yeni canlı satır 0,18 sn'de belirir; Windows'ta animasyonlar kapalıysa geçiş yok (docs/TASARIM.md).</summary>
     private void FadeInLiveLine()
@@ -215,11 +218,11 @@ public partial class MainView : UserControl
         catch (Exception error) { StartupGuard.Log("Deneme altyazısı gönderilemedi", error); }
     }
 
-    /// <summary>Fareyle ekrandan bölge seçip tek seferlik çeviri açar (çeviri durdurulmuşken de masaüstünü yakalar).</summary>
-    private async void OnFreeArea(object sender, RoutedEventArgs e)
+    /// <summary>Fareyle ekrandan bölge seçip tek seferlik çeviri açar (yalnız çeviri başlattıktan sonra aktif).</summary>
+    private void OnFreeArea(object sender, RoutedEventArgs e)
     {
-        try { await FreeAreaWindow.OpenFromDesktopAsync(controller, Window.GetWindow(this)); }
-        catch (Exception error) { StartupGuard.Log("Bölge çevirisi açılamadı", error); }
+        System.Windows.Input.Keyboard.ClearFocus();
+        FreeAreaWindow.Open(controller);
     }
 
     /// <summary>TV'siz kurulmuş uygulamada TV'yi sonradan bağlamak için sihirbazın TV adımı açılır.</summary>
