@@ -495,6 +495,22 @@ public class AppControllerTests
         Assert.Equal("Oturma Odası Xbox", store.Load<XboxConsole>(StoreKeys.XboxConsole)?.Name);
     }
 
+    /// beta.45 öncesi ANSI (1254) okunup bozuk kaydedilen ad (#268) açılışta, liste sorulmadan düzelir; doğru ad değişmez.
+    [Theory]
+    [InlineData("Oturma OdasÄ± Xbox", "Oturma Odası Xbox")]
+    [InlineData("Oturma Odası Xbox", "Oturma Odası Xbox")]
+    [InlineData("Salon Xbox", "Salon Xbox")]
+    [InlineData("Çalışma Odası", "Çalışma Odası")]
+    public void SavedXboxNameMisreadAsAnsiIsRepairedOnLaunch(string saved, string expected)
+    {
+        var store = new MemoryStore();
+        store.Save(StoreKeys.XboxToken, "{}");
+        store.Save(StoreKeys.XboxConsole, new XboxConsole("F4", saved, "XboxSeriesX", true));
+        var controller = new AppController(new FakeServices(), store, new MemorySettings(), new FakeSleep(), Localizer.ForLanguage("tr"), action => action());
+        Assert.Equal(expected, controller.SelectedXboxConsole?.Name);
+        Assert.Equal(expected, store.Load<XboxConsole>(StoreKeys.XboxConsole)?.Name);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -848,6 +864,27 @@ public class AppControllerTests
         Assert.True(controller.UsesFreeGemini);
     }
 
+    /// <summary>
+    /// Hizmet o an yoğunsa (503, zaman aşımı, dakikalık sınır) anahtar reddedilmedi: kaydedilir. İleti internet
+    /// bağlantısını ya da bakiyeyi suçlamaz; yerel modelde ise sunucunun açık olup olmadığı sorulur.
+    /// </summary>
+    [Fact]
+    public async Task BusyServiceStillSavesTheKey()
+    {
+        var services = new FakeServices { AiTest = new AiTestResult(OnlineKeyState.Busy) };
+        var store = new MemoryStore();
+        var controller = Make(services, store);
+        Assert.Equal(OnlineKeyState.Busy, (await controller.SetAiKeyAsync(AiProvider.Gemini, "AIza-slow")).State);
+        Assert.Equal("AIza-slow", store.Load<string>(StoreKeys.GeminiKey));
+
+        var en = Localizer.ForLanguage("en");
+        var busy = OnlineKeyState.Busy.Describe(TranslationEngine.Gemini, en);
+        Assert.Equal("Gemini is busy or did not answer in time. Try again in a moment, or choose the faster model.", busy);
+        Assert.DoesNotContain("internet", OnlineKeyState.Busy.Describe(TranslationEngine.Gemini, Localizer.ForLanguage("tr")));
+        Assert.DoesNotContain("bakiye", OnlineKeyState.Busy.Describe(TranslationEngine.Gemini, Localizer.ForLanguage("tr")));
+        Assert.Equal(OnlineKeyState.Unreachable.DescribeLocal(null, en), OnlineKeyState.Busy.DescribeLocal(null, en));
+    }
+
     /// <summary>Ayarlardaki "Ücretsiz anahtar al" Gemini'yi seçer; anahtar gelene dek ücretsiz çeviri sürer.</summary>
     [Fact]
     public void ChooseFreeGeminiSelectsGeminiWithoutAKey()
@@ -1168,6 +1205,91 @@ public class AppControllerRunTests
             if (line == "event: clear") { sawClear = true; break; }
         Assert.True(sawClear);
         controller.Dispose();
+    }
+
+    /// TV'nin aldığı olay satırlarını arka planda toplar.
+    private static (List<string> Lines, Task Reading) CollectEvents(StreamReader reader)
+    {
+        var lines = new List<string>();
+        var reading = Task.Run(async () =>
+        {
+            try
+            {
+                while (await reader.ReadLineAsync() is { } line)
+                    lock (lines) lines.Add(line);
+            }
+            catch (IOException) { }
+            catch (ObjectDisposedException) { }
+        });
+        return (lines, reading);
+    }
+
+    private static int Count(List<string> lines, string line)
+    {
+        lock (lines) return lines.Count(l => l == line);
+    }
+
+    /// #268: ayar değişikliğiyle yeniden başlatmada TV uygulaması kapanmaz; kullanıcı durdurunca kapanır.
+    [Fact]
+    public async Task TvAppExitsOnlyWhenUserStops()
+    {
+        var (controller, services, _) = Ready();
+        await controller.StartAsync();
+        using var http = new HttpClient();
+        using var response = await http.GetAsync($"http://127.0.0.1:{controller.ServerPort}/events", HttpCompletionOption.ResponseHeadersRead);
+        using var reader = new StreamReader(await response.Content.ReadAsStreamAsync());
+        var (lines, reading) = CollectEvents(reader);
+        for (var i = 0; i < 200 && controller.TvClients == 0; i++) await Task.Delay(10);
+
+        controller.Settings = controller.Settings with { FrameSource = FrameSource.RemotePlayWindow };
+        for (var i = 0; i < 200 && services.Streams.Count < 2; i++) await Task.Delay(10);
+        Assert.True(controller.IsRunning);
+        await Task.Delay(300);
+        Assert.Equal(0, Count(lines, "event: exit"));
+
+        controller.Stop();
+        for (var i = 0; i < 300 && Count(lines, "event: exit") == 0; i++) await Task.Delay(10);
+        Assert.Equal(1, Count(lines, "event: exit"));
+        controller.Dispose();
+        // Okuyucu, arka planda okuma sürerken kapatılırsa HttpContentReadStream.Dispose NullReferenceException atar.
+        await reading.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    /// #268: uygulama kapanırken çıkış mesajı sunucu kapanmadan TV'ye yazılır.
+    [Fact]
+    public async Task DisposeSendsTvExitBeforeServerCloses()
+    {
+        var (controller, _, _) = Ready();
+        await controller.StartAsync();
+        using var http = new HttpClient();
+        using var response = await http.GetAsync($"http://127.0.0.1:{controller.ServerPort}/events", HttpCompletionOption.ResponseHeadersRead);
+        using var reader = new StreamReader(await response.Content.ReadAsStreamAsync());
+        var (lines, reading) = CollectEvents(reader);
+        for (var i = 0; i < 200 && controller.TvClients == 0; i++) await Task.Delay(10);
+
+        controller.Dispose();
+        await reading.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(1, Count(lines, "event: exit"));
+    }
+
+    /// Çeviri sürerken altyazı TV'den kaldırılınca TV uygulaması kapanır.
+    [Fact]
+    public async Task RemovingTvOutputExitsTvApp()
+    {
+        var (controller, _, _) = Ready();
+        await controller.StartAsync();
+        using var http = new HttpClient();
+        using var response = await http.GetAsync($"http://127.0.0.1:{controller.ServerPort}/events", HttpCompletionOption.ResponseHeadersRead);
+        using var reader = new StreamReader(await response.Content.ReadAsStreamAsync());
+        var (lines, reading) = CollectEvents(reader);
+        for (var i = 0; i < 200 && controller.TvClients == 0; i++) await Task.Delay(10);
+
+        controller.Settings = controller.Settings with { Output = SubtitleOutput.Computer };
+        for (var i = 0; i < 300 && Count(lines, "event: exit") == 0; i++) await Task.Delay(10);
+        Assert.Equal(1, Count(lines, "event: exit"));
+        Assert.True(controller.IsRunning);
+        controller.Dispose();
+        await reading.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]

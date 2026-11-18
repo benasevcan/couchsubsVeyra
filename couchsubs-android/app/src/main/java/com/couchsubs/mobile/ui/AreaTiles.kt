@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Ayarlar › Altyazı alanı ve Ek alanlar (iPhone'daki AreaTile ve ExtraAreasTile ile aynı): hazır seçimler, son kareyle
-// canlı önizleme (çerçeve sürüklenir, köşesinden büyütülür), Özel'de kaydırıcılar; en çok üç ek alan.
+// canlı önizleme (çerçeve sürüklenir, kenar ve köşelerinden boyutlanır; altyazı alanında "Ortada tut"), Özel'de
+// kaydırıcılar; en çok üç ek alan.
 package com.couchsubs.mobile.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,16 +20,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -50,21 +53,76 @@ import androidx.compose.ui.unit.dp
 import com.couchsubs.mobile.R
 import com.couchsubs.mobile.Services
 import com.couchsubs.mobile.core.AreaPreset
+import com.couchsubs.mobile.core.areasDifferFromProfile
 import com.couchsubs.mobile.core.CropRegion
 import com.couchsubs.mobile.core.ExtraArea
 import com.couchsubs.mobile.core.ExtraAreaPreset
 import com.couchsubs.mobile.core.MINIMUM_REGION_SIZE
-import com.couchsubs.mobile.core.moved
-import com.couchsubs.mobile.core.resized
+import com.couchsubs.mobile.core.RegionEdit
 import com.couchsubs.mobile.core.withVertical
 import com.couchsubs.mobile.service.FramePreview
+import com.couchsubs.mobile.service.LiveState
+import com.couchsubs.mobile.service.PlayedGame
+
+/**
+ * Ayarlar › Bu oyunun alanları: alanlar oynanan oyuna kaydedilir, o oyun yeniden oynanınca kendiliğinden gelir. Profil
+ * etkinse hangi oyunun alanları olduğu ve kaydedilmemiş değişiklikte "Profile kaydet" (Windows, Mac ve iPhone ile aynı).
+ */
+@Composable
+fun AreaProfileTile() {
+    val status by LiveState.status.collectAsState()
+    val settings = Services.settings
+    // Alanlar bu ekranda değişince "kaydedilmedi" durumu yeniden okunur.
+    var edits by remember { mutableIntStateOf(0) }
+    DisposableEffect(settings) {
+        val listener = settings.onAreasChanged { edits++ }
+        onDispose { settings.removeListener(listener) }
+    }
+    val active = status.areaProfileGame
+    val target = status.areaProfileTarget
+    val unsaved = remember(edits, status.areasVersion, active) { settings.areasDifferFromProfile }
+    var confirmDelete by remember { mutableStateOf(false) }
+    Tile(Modifier.fillMaxWidth()) {
+        TileLabel(stringResource(R.string.area_profile_title))
+        val (headline, note) = when {
+            active != null -> stringResource(R.string.area_profile_saved, active) to
+                stringResource(if (unsaved) R.string.area_profile_unsaved else R.string.area_profile_comes_back)
+            target != null -> stringResource(R.string.area_profile_general) to stringResource(R.string.area_profile_save_note, target)
+            else -> stringResource(R.string.area_profile_unknown) to stringResource(R.string.area_profile_choose_game)
+        }
+        Text(headline, style = Tokens.Type.body, color = Tokens.Color.text)
+        Text(note, style = Tokens.Type.caption, color = Tokens.Color.secondary)
+        if (target != null && (active == null || unsaved)) {
+            SecondaryButton(if (active == null) stringResource(R.string.area_profile_save_for, target) else stringResource(R.string.area_profile_save)) {
+                PlayedGame.areas.save()
+            }
+        }
+        if (active != null) DestructiveButton(stringResource(R.string.area_profile_delete)) { confirmDelete = true }
+    }
+    if (confirmDelete && active != null) AlertDialog(
+        onDismissRequest = { confirmDelete = false },
+        title = { Text(stringResource(R.string.area_profile_delete)) },
+        text = { Text(stringResource(R.string.area_profile_delete_body, active)) },
+        confirmButton = {
+            TextButton({
+                confirmDelete = false
+                PlayedGame.areas.delete()
+            }) { Text(stringResource(R.string.area_profile_delete), color = Tokens.Color.danger) }
+        },
+        dismissButton = { TextButton({ confirmDelete = false }) { Text(stringResource(R.string.cancel)) } },
+        containerColor = Tokens.Color.surface2,
+    )
+}
 
 /** Ayarlar › Altyazı alanı: Alt alan, Üst alan, Tam ekran, Özel; önizlemede çerçeve sürüklenir. */
 @Composable
 fun AreaTile() {
     val settings = Services.settings
-    var region by remember { mutableStateOf(settings.region) }
-    var preset by remember { mutableStateOf(settings.areaPreset) }
+    // Oyunun alanları uygulanınca ya da geri dönülünce ([LiveStatus.areasVersion]) kayıtlı alan yeniden okunur.
+    val version = LiveState.status.collectAsState().value.areasVersion
+    var region by remember(version) { mutableStateOf(settings.region) }
+    var preset by remember(version) { mutableStateOf(settings.areaPreset) }
+    var centered by remember { mutableStateOf(settings.keepAreaCentered) }
     fun custom(value: CropRegion) {
         region = value
         preset = AreaPreset.CUSTOM
@@ -79,27 +137,25 @@ fun AreaTile() {
             settings.selectAreaPreset(preset)
             region = settings.region
         }
-        RegionPreview(region, onChange = ::custom)
+        RegionPreview(region, centered = centered, onChange = ::custom)
         if (preset == AreaPreset.CUSTOM) {
             val position = region.top * 100
             val height = (region.bottom - region.top) * 100
             SliderRow(stringResource(R.string.area_position), position, 0f..maxOf(1.0, 100 - height).toFloat()) { custom(region.withVertical(it, height)) }
             SliderRow(stringResource(R.string.area_height), height, (MINIMUM_REGION_SIZE * 100).toFloat()..100f) { custom(region.withVertical(position, it)) }
         }
-        Text(stringResource(R.string.area_drag_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+        RowItem(stringResource(R.string.area_keep_centered)) { Switch(centered, { centered = it; settings.keepAreaCentered = it }) }
+        // "Ortalı kalır" yalnız Ortada tut açıkken yazılır.
+        Text(stringResource(if (centered) R.string.area_drag_note else R.string.area_drag_note_free), style = Tokens.Type.caption,
+            color = Tokens.Color.secondary)
     }
 }
 
 @Composable
 private fun SliderRow(title: String, value: Double, range: ClosedFloatingPointRange<Float>, onChange: (Double) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.hair)) {
-        Row {
-            TileLabel(title)
-            Spacer(Modifier.weight(1f))
-            TileLabel("%${value.toInt()}")
-        }
-        Slider(value.toFloat(), { onChange(it.toDouble()) }, valueRange = range,
-            colors = SliderDefaults.colors(thumbColor = Tokens.Color.text, activeTrackColor = Tokens.Color.accent, inactiveTrackColor = Tokens.Color.borderStrong))
+        SliderHeader(title, "%${value.toInt()}")
+        Slider(value.toFloat(), { onChange(it.toDouble()) }, valueRange = range, colors = couchSliderColors())
     }
 }
 
@@ -107,7 +163,8 @@ private fun SliderRow(title: String, value: Double, range: ClosedFloatingPointRa
 @Composable
 fun ExtraAreasTile() {
     val settings = Services.settings
-    var areas by remember { mutableStateOf(settings.extraAreas) }
+    val version = LiveState.status.collectAsState().value.areasVersion
+    var areas by remember(version) { mutableStateOf(settings.extraAreas) }
     var menu by remember { mutableStateOf(false) }
     fun save(value: List<ExtraArea>) {
         areas = value
@@ -118,7 +175,9 @@ fun ExtraAreasTile() {
         TileLabel(stringResource(R.string.extra_title))
         Text(stringResource(R.string.extra_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
         areas.forEach { area ->
-            Column(Modifier.fillMaxWidth().background(Tokens.Color.surface2, RoundedCornerShape(Tokens.Radius.tile)).padding(Tokens.Space.gap),
+            // Karo içindeki kutu: inner köşe ve çerçeve, zemin karonunki; böylece içindeki ad alanı (surface2) kutudan ayrılır.
+            val shape = RoundedCornerShape(Tokens.Radius.inner)
+            Column(Modifier.fillMaxWidth().border(1.dp, Tokens.Color.borderStrong, shape).padding(Tokens.Space.gap),
                 verticalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
                     Box(Modifier.weight(1f)) {
@@ -165,11 +224,13 @@ private fun presetName(preset: ExtraAreaPreset) = stringResource(when (preset) {
 })
 
 /**
- * Son PS5 karesi (çeviri sürerken) üstünde bölge çerçevesi: içinden sürüklenince kayar, sağ alt köşesinden sürüklenince
- * büyür. Kare yoksa düz zemin ve açıklama.
+ * Alanın canlı önizlemesi: son karenin üstünde çerçeve; alanın dışı karartılır, okunacak yer belirgin olur. Çerçeve
+ * içinden sürüklenerek taşınır, sekiz tutamacından (köşeler ve kenar ortaları) sürüklenerek boyutlandırılır. [centered]
+ * (altyazı alanında "Ortada tut" açıkken): yatay boyut ortadan değişir, alan ortalı kalır. Kurallar [RegionEdit]'tedir (Windows, Mac ve iPhone ile
+ * aynı). Çerçevenin dışından başlayan sürükleme bir şey değiştirmez.
  */
 @Composable
-fun RegionPreview(region: CropRegion, onChange: (CropRegion) -> Unit) {
+fun RegionPreview(region: CropRegion, centered: Boolean = false, onChange: (CropRegion) -> Unit) {
     DisposableEffect(Unit) {
         FramePreview.watch(true)
         onDispose { FramePreview.watch(false) }
@@ -177,32 +238,48 @@ fun RegionPreview(region: CropRegion, onChange: (CropRegion) -> Unit) {
     val frame by FramePreview.frame.collectAsState()
     val current by rememberUpdatedState(region)
     val change by rememberUpdatedState(onChange)
+    val evenly by rememberUpdatedState(centered)
     Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(Tokens.Radius.control)).background(Color.Black)) {
         frame?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds) }
             ?: Text(stringResource(R.string.area_preview_empty), style = Tokens.Type.caption, color = Tokens.Color.secondary,
                 textAlign = TextAlign.Center, modifier = Modifier.align(Alignment.Center).padding(Tokens.Space.gap))
         Canvas(Modifier.fillMaxSize().pointerInput(Unit) {
-            var resizing = false
-            detectDragGestures(onDragStart = { start ->
-                val r = current
-                val corner = Offset((r.right * size.width).toFloat(), (r.bottom * size.height).toFloat())
-                resizing = (start - corner).getDistance() < 32.dp.toPx()
-            }) { change2, drag ->
-                change2.consume()
-                val r = current
-                val next = if (resizing) {
-                    val x = change2.position.x / size.width
-                    val y = change2.position.y / size.height
-                    r.resized(right = x.toDouble(), bottom = y.toDouble())
-                } else r.moved(dx = drag.x.toDouble() / size.width, dy = drag.y.toDouble() / size.height)
-                change(next)
+            var start = current
+            var handle: Int? = null
+            var moved = Offset.Zero
+            detectDragGestures(
+                onDragStart = { at ->
+                    start = current
+                    moved = Offset.Zero
+                    // Parmakla tutulsun diye tutma payı görünen tutamaçtan geniştir.
+                    val grab = 20.dp.toPx()
+                    handle = RegionEdit.handleAt(start, at.x.toDouble() / size.width, at.y.toDouble() / size.height,
+                        grab.toDouble() / size.width, grab.toDouble() / size.height)
+                },
+                onDragEnd = { handle = null },
+                onDragCancel = { handle = null },
+            ) { pointer, drag ->
+                val grabbed = handle ?: return@detectDragGestures
+                pointer.consume()
+                moved += drag
+                change(RegionEdit.dragged(start, grabbed, moved.x.toDouble() / size.width, moved.y.toDouble() / size.height, evenly))
             }
         }) {
-            val topLeft = Offset((region.left * size.width).toFloat(), (region.top * size.height).toFloat())
-            val box = Size(((region.right - region.left) * size.width).toFloat(), ((region.bottom - region.top) * size.height).toFloat())
-            drawRect(Tokens.Color.accent.copy(alpha = 0.15f), topLeft, box)
-            drawRect(Tokens.Color.accent, topLeft, box, style = Stroke(2.dp.toPx()))
-            drawCircle(Tokens.Color.accent, 7.dp.toPx(), Offset(topLeft.x + box.width, topLeft.y + box.height))
+            val left = (region.left * size.width).toFloat()
+            val top = (region.top * size.height).toFloat()
+            val right = (region.right * size.width).toFloat()
+            val bottom = (region.bottom * size.height).toFloat()
+            val shade = Color.Black.copy(alpha = 0.5f)
+            drawRect(shade, Offset.Zero, Size(size.width, top))
+            drawRect(shade, Offset(0f, bottom), Size(size.width, size.height - bottom))
+            drawRect(shade, Offset(0f, top), Size(left, bottom - top))
+            drawRect(shade, Offset(right, top), Size(size.width - right, bottom - top))
+            drawRect(Tokens.Color.accent, Offset(left, top), Size(right - left, bottom - top), style = Stroke(2.dp.toPx()))
+            val handleSize = 9.dp.toPx()
+            RegionEdit.handles(region).forEach { grip ->
+                drawRect(Tokens.Color.accent, Offset((grip.x * size.width).toFloat() - handleSize / 2, (grip.y * size.height).toFloat() - handleSize / 2),
+                    Size(handleSize, handleSize))
+            }
         }
     }
 }

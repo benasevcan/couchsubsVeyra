@@ -2,8 +2,10 @@
 
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using CouchSubs.App.Controls;
 using CouchSubs.Core;
@@ -17,6 +19,10 @@ public partial class MainView : UserControl
     private readonly AppController controller;
     // Çeviri sürerken PS5 ve TV bağlanamıyorsa güvenlik duvarı kartı önerilir.
     private readonly DispatcherTimer connectionWatch = new() { Interval = TimeSpan.FromSeconds(5) };
+    /// <summary>Canlı altyazı karosu yalnız bu oturumun satırlarını gösterir (önceki oturumlar Geçmiş'te).</summary>
+    private DateTime? sessionStartedAt;
+    /// <summary>Karoda son satırın altında en çok bu kadar önceki satır durur.</summary>
+    private const int PreviousLineCount = 8;
 
     public MainView(AppController controller)
     {
@@ -36,6 +42,7 @@ public partial class MainView : UserControl
         ShowTiles();
         ShowUpdate();
         ShowGame();
+        ShowPreviousLines();
         _ = controller.CheckForUpdateAsync();
     }
 
@@ -46,8 +53,15 @@ public partial class MainView : UserControl
             Refresh();
         if (e.PropertyName is nameof(AppController.Settings) or nameof(AppController.InstalledPacks))
             ShowTiles();
-        if (e.PropertyName is nameof(AppController.IsRunning) or nameof(AppController.PlayedGame) or nameof(AppController.AskingGame))
+        if (e.PropertyName is nameof(AppController.IsRunning) or nameof(AppController.PlayedGame) or nameof(AppController.AskingGame)
+            or nameof(AppController.AreaProfileGame) or nameof(AppController.OfferedAreaProfileGame))
             ShowGame();
+        if (e.PropertyName is nameof(AppController.IsRunning) && controller.IsRunning)
+            sessionStartedAt = DateTime.UtcNow;
+        if (e.PropertyName is nameof(AppController.LastTranslation))
+            FadeInLiveLine();
+        if (e.PropertyName is nameof(AppController.History) or nameof(AppController.LastTranslation) or nameof(AppController.IsRunning))
+            ShowPreviousLines();
         if (e.PropertyName is nameof(AppController.UpdateVersion) or nameof(AppController.Updating)
             or nameof(AppController.UpdateProgress) or nameof(AppController.UpdateError))
             ShowUpdate();
@@ -74,12 +88,45 @@ public partial class MainView : UserControl
     {
         var text = Localizer.Current;
         var settings = controller.Settings;
-        ScreenShortcutText.Text = HotkeyText.Title(settings, HotkeyAction.Screen, "Translate the screen (%@)");
+        ShowScreenKeys(settings);
         EngineText.Text = settings.Engine == TranslationEngine.Free ? text["Free"] : settings.Engine.DisplayName();
         var packs = controller.InstalledPacks.Count;
         var active = settings.GamePacks && settings.SourceLanguage == "en" && settings.TargetLanguage == "tr" && packs > 0;
         PackTile.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
         PackText.Text = text.Format("Game packs are on · %lld games translated in advance", packs);
+    }
+
+    /// <summary>
+    /// Bilgi karosunun "Ekranı çevir" satırı: Ayarlar › Kısayollar'da seçili her tuş bir Keycap, aralarında "ya da".
+    /// Hiç kısayol yoksa "kısayol yok" yazar. Kısayol değişince Settings bildirimiyle yeniden kurulur.
+    /// </summary>
+    private void ShowScreenKeys(UserSettings settings)
+    {
+        var text = Localizer.Current;
+        var keys = HotkeyTable.KeysFor(settings.Hotkeys, HotkeyAction.Screen);
+        ScreenKeys.Children.Clear();
+        ScreenKeys.ToolTip = HotkeyText.Title(settings, HotkeyAction.Screen, "Translate the screen (%@)");
+        if (keys.Count == 0)
+        {
+            ScreenKeys.Children.Add(new TextBlock
+            {
+                Text = text["no shortcut"], Style = (Style)FindResource("CaptionText"),
+                VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.NoWrap,
+            });
+            return;
+        }
+        for (var index = 0; index < keys.Count; index++)
+        {
+            if (index > 0)
+                ScreenKeys.Children.Add(new TextBlock
+                {
+                    Text = text["or"], Style = (Style)FindResource("CaptionText"), Margin = new Thickness(8, 0, 8, 0),
+                    VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.NoWrap,
+                });
+            var label = new TextBlock { Text = keys[index].Label, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.NoWrap };
+            System.Windows.Documents.Typography.SetNumeralAlignment(label, FontNumeralAlignment.Tabular);
+            ScreenKeys.Children.Add(new Border { Style = (Style)FindResource("Keycap"), Child = label });
+        }
     }
 
     private async void OnUpdate(object sender, RoutedEventArgs e) => await controller.InstallUpdateAsync();
@@ -125,6 +172,40 @@ public partial class MainView : UserControl
 
     private void OnSettings(object sender, RoutedEventArgs e) => SettingsWindow.Open(Window.GetWindow(this), controller);
 
+    private void OnTranslationSettings(object sender, RoutedEventArgs e) =>
+        SettingsWindow.Open(Window.GetWindow(this), controller, SettingsSection.Translation);
+
+    /// <summary>Yeni canlı satır 0,18 sn'de belirir; Windows'ta animasyonlar kapalıysa geçiş yok (docs/TASARIM.md).</summary>
+    private void FadeInLiveLine()
+    {
+        if (!SystemParameters.ClientAreaAnimation)
+        {
+            LiveLine.BeginAnimation(OpacityProperty, null);
+            return;
+        }
+        LiveLine.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180))
+        {
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
+        });
+    }
+
+    /// <summary>
+    /// Son satır büyük ve sarı yazılır; bu oturumda ondan önce gösterilen satırlar altında, en yenisi üstte (geçmiş en
+    /// yeniden eskiye sıralıdır). Son satır geçmişin en yenisiyse listede tekrar edilmez. Henüz satır yokken liste boştur.
+    /// </summary>
+    private void ShowPreviousLines()
+    {
+        if (string.IsNullOrEmpty(controller.LastTranslation))
+        {
+            PreviousLines.ItemsSource = null;
+            return;
+        }
+        var since = sessionStartedAt ?? DateTime.MinValue;
+        var lines = controller.History.Where(entry => entry.Date >= since).ToList();
+        if (lines.Count > 0 && lines[0].Translation == controller.LastTranslation) lines.RemoveAt(0);
+        PreviousLines.ItemsSource = lines.Take(PreviousLineCount).ToList();
+    }
+
     private void OnHistory(object sender, RoutedEventArgs e) => HistoryWindow.Open(Window.GetWindow(this), controller);
 
     /// <summary>Deneme altyazısı (çeviri başlamadıysa altyazı sunucusu da açılır).</summary>
@@ -158,7 +239,7 @@ public partial class MainView : UserControl
             });
             if (process is not null) await process.WaitForExitAsync();
             if (!controller.IsRunning) return;
-            controller.Stop();
+            controller.StopForRestart();
             await controller.StartAsync();
         }
         catch (System.ComponentModel.Win32Exception) { /* izin verilmedi */ }
@@ -183,7 +264,28 @@ public partial class MainView : UserControl
         GameChangeButton.Content = text[controller.PlayedGame is null ? "Choose" : "Change"];
         if (asking) ShowGameSuggestions();
         else GameSearch.Text = "";
+        ShowAreaProfile(asking);
     }
+
+    /// <summary>
+    /// Oyunun kayıtlı alanları: uygulandıysa "X için kayıtlı alanlar kullanılıyor · Geri al"; oyun yalnız paketten
+    /// tanındıysa "X için kayıtlı alanlar var. Kullanılsın mı? · Kullan / Hayır" (Mac, iPhone ve Android ile aynı).
+    /// </summary>
+    private void ShowAreaProfile(bool asking)
+    {
+        var text = Localizer.Current;
+        var offered = controller.OfferedAreaProfileGame;
+        var active = controller.AreaProfileGame;
+        AreaProfileRow.Visibility = !asking && (offered ?? active) is not null ? Visibility.Visible : Visibility.Collapsed;
+        AreaProfileUse.Visibility = AreaProfileNo.Visibility = offered is not null ? Visibility.Visible : Visibility.Collapsed;
+        AreaProfileUndo.Visibility = offered is null && active is not null ? Visibility.Visible : Visibility.Collapsed;
+        AreaProfileText.Text = offered is not null ? text.Format("Saved areas for %@ are available. Use them?", offered)
+            : active is not null ? text.Format("Using the saved areas for %@.", active) : "";
+    }
+
+    private void OnUseAreaProfile(object sender, RoutedEventArgs e) => controller.UseOfferedAreaProfile();
+    private void OnDeclineAreaProfile(object sender, RoutedEventArgs e) => controller.DeclineOfferedAreaProfile();
+    private void OnUndoAreaProfile(object sender, RoutedEventArgs e) => controller.UndoAreaProfile();
 
     private void ShowGameSuggestions()
     {

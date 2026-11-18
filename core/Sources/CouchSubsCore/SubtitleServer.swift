@@ -236,6 +236,27 @@ public final class SubtitleServer: @unchecked Sendable {
         onEvent?(.clear)
     }
 
+    /// TV uygulamasını kapatır; çeviri durduğunda TV kendi girişine (HDMI) döner (#268, Windows ile aynı). Yalnız
+    /// TV'lere gider, OBS gibi izleyicilere gitmez. `completion`, mesaj bütün TV'lere yazılınca (ya da yazılamayınca)
+    /// sunucunun kuyruğunda çağrılır; kapanışta sunucu durdurulmadan önce kısa süre beklenebilir.
+    public func exitTVApp(completion: (@Sendable () -> Void)? = nil) {
+        let data = Data(Self.frame(event: "exit", json: [:]).utf8)
+        queue.async {
+            let group = DispatchGroup()
+            for (id, connection) in self.clients where !self.viewers.contains(id) {
+                group.enter()
+                connection.send(content: data, completion: .contentProcessed { [weak self] error in
+                    if let self, error != nil {
+                        connection.cancel()
+                        if self.clients.removeValue(forKey: id) != nil { self.notifyClientsChanged() }
+                    }
+                    group.leave()
+                })
+            }
+            group.notify(queue: self.queue) { completion?() }
+        }
+    }
+
     /// "Ekranı çevir" sonuçları: `screen` olayı her çeviriyi yazının yeri (`box`), tipik satır yüksekliği (`line`,
     /// ekrana oranla) ve çok parçalıysa `paragraphs` ile taşır. TV öncekinin yerine bunları koyar.
     public func sendScreen(_ items: [ScreenTranslation.Item], durationMs: Int) {

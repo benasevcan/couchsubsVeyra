@@ -4,6 +4,22 @@
     "Extra instruction": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Extra instruction"}},"tr":{"stringUnit":{"state":"translated","value":"Ek talimat"}}}},
     "Example: Translate swear words without softening them.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Example: Translate swear words without softening them."}},"tr":{"stringUnit":{"state":"translated","value":"Örn: Küfürleri yumuşatmadan çevir."}}}},
     "Added to the end of the AI translator's instructions (up to 1000 characters). Leave it empty if you don't need it.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Added to the end of the AI translator's instructions (up to 1000 characters). Leave it empty if you don't need it."}},"tr":{"stringUnit":{"state":"translated","value":"Yapay zekâ çevirmeninin talimatının sonuna eklenir (en çok 1000 karakter). Gerekmiyorsa boş bırakın."}}}},
+    "Use": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Use"}},"tr":{"stringUnit":{"state":"translated","value":"Kullan"}}}},
+    "Undo": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Undo"}},"tr":{"stringUnit":{"state":"translated","value":"Geri al"}}}},
+    "Saved areas for %@ are available. Use them?": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Saved areas for %@ are available. Use them?"}},"tr":{"stringUnit":{"state":"translated","value":"%@ için kayıtlı alanlar var. Kullanılsın mı?"}}}},
+    "Using the saved areas for %@.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Using the saved areas for %@."}},"tr":{"stringUnit":{"state":"translated","value":"%@ için kayıtlı alanlar kullanılıyor."}}}},
+    "Areas for this game": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Areas for this game"}},"tr":{"stringUnit":{"state":"translated","value":"Bu oyunun alanları"}}}},
+    "Delete profile": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Delete profile"}},"tr":{"stringUnit":{"state":"translated","value":"Profili sil"}}}},
+    "These areas are saved for %@.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"These areas are saved for %@."}},"tr":{"stringUnit":{"state":"translated","value":"Bu alanlar %@ için kayıtlı."}}}},
+    "These are your general areas.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"These are your general areas."}},"tr":{"stringUnit":{"state":"translated","value":"Bunlar genel alanlarınız."}}}},
+    "Areas can be saved for a game while translating, once the game being played is known.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Areas can be saved for a game while translating, once the game being played is known."}},"tr":{"stringUnit":{"state":"translated","value":"Çeviri sürerken oynanan oyun bilinince alanlar o oyuna kaydedilebilir."}}}},
+    "Your changes are not saved yet; they are dropped when translating stops.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Your changes are not saved yet; they are dropped when translating stops."}},"tr":{"stringUnit":{"state":"translated","value":"Değişiklikleriniz henüz kaydedilmedi; çeviri durunca bırakılır."}}}},
+    "They come back by themselves whenever you play this game.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"They come back by themselves whenever you play this game."}},"tr":{"stringUnit":{"state":"translated","value":"Bu oyunu her oynadığınızda kendiliğinden gelir."}}}},
+    "Save them for %@ and they come back by themselves the next time you play it.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Save them for %@ and they come back by themselves the next time you play it."}},"tr":{"stringUnit":{"state":"translated","value":"%@ için kaydederseniz bu oyunu yeniden oynadığınızda kendiliğinden gelir."}}}},
+    "The played game is shown on the home screen; you can choose it there.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The played game is shown on the home screen; you can choose it there."}},"tr":{"stringUnit":{"state":"translated","value":"Oynanan oyun ana ekranda görünür; oradan seçebilirsiniz."}}}},
+    "Save to profile": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Save to profile"}},"tr":{"stringUnit":{"state":"translated","value":"Profile kaydet"}}}},
+    "Save for %@": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Save for %@"}},"tr":{"stringUnit":{"state":"translated","value":"%@ için kaydet"}}}},
+    "Delete the saved areas for %@?": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Delete the saved areas for %@?"}},"tr":{"stringUnit":{"state":"translated","value":"%@ için kayıtlı alanlar silinsin mi?"}}}},
     "%@ or %@": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"%@ or %@"}},"tr":{"stringUnit":{"state":"translated","value":"%@ ya da %@"}}}},
     "no shortcut": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"no shortcut"}},"tr":{"stringUnit":{"state":"translated","value":"kısayol yok"}}}},
     "Translate the screen (%@)": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Translate the screen (%@)"}},"tr":{"stringUnit":{"state":"translated","value":"Ekranı çevir (%@)"}}}},
@@ -36,6 +52,11 @@
     "Windows already uses this shortcut.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Windows already uses this shortcut."}},"tr":{"stringUnit":{"state":"translated","value":"Bu kısayolu Windows kullanıyor."}}}},
     "This key can't be a shortcut.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"This key can't be a shortcut."}},"tr":{"stringUnit":{"state":"translated","value":"Bu tuş kısayol olamaz."}}}},
     "When you turn on the controller to play, choose your MAIN account on the PS5. Don't play with the second account CouchSubs signs in with, or the controller won't work in the game.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "When you turn on the controller to play, choose your MAIN account on the PS5. Don't play with the second account CouchSubs signs in with, or the controller won't work in the game."}}, "tr": {"stringUnit": {"state": "translated", "value": "Oynarken kolu açınca PS5'te ANA hesabınızı seçin. CouchSubs'ın giriş yaptığı ikinci hesapla oynamayın, yoksa kol oyunda çalışmaz."}}}},
+    "Drag on the picture to draw the area where the game shows its subtitles. Drag an edge or corner to resize it; it stays centered. Drag the inside to move it.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Drag on the picture to draw the area where the game shows its subtitles. Drag an edge or corner to resize it; it stays centered. Drag the inside to move it."}},"tr":{"stringUnit":{"state":"translated","value":"Oyunun altyazıyı gösterdiği alanı, görüntünün üzerinde fareyi sürükleyerek çizin. Kenarından ya da köşesinden tutup boyutunu değiştirin; alan ortalı kalır. İçinden tutup yerini değiştirebilirsiniz."}}}},
+    "Drag the frame to move it, or drag an edge or corner to resize it; the subtitle area stays centered.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Drag the frame to move it, or drag an edge or corner to resize it; the subtitle area stays centered."}},"tr":{"stringUnit":{"state":"translated","value":"Çerçeveyi sürükleyerek taşıyın, kenarından ya da köşesinden sürükleyerek boyutlandırın; altyazı alanı ortalı kalır."}}}},
+    "Keep centered": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Keep centered"}},"tr":{"stringUnit":{"state":"translated","value":"Ortada tut"}}}},
+    "Drag on the picture to draw the area where the game shows its subtitles. Drag an edge or corner to resize it, or the inside to move it.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Drag on the picture to draw the area where the game shows its subtitles. Drag an edge or corner to resize it, or the inside to move it."}},"tr":{"stringUnit":{"state":"translated","value":"Oyunun altyazıyı gösterdiği alanı, görüntünün üzerinde fareyi sürükleyerek çizin. Kenarından ya da köşesinden tutup boyutunu, içinden tutup yerini değiştirebilirsiniz."}}}},
+    "Drag the frame to move it, or drag an edge or corner to resize it.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Drag the frame to move it, or drag an edge or corner to resize it."}},"tr":{"stringUnit":{"state":"translated","value":"Çerçeveyi sürükleyerek taşıyın, kenarından ya da köşesinden sürükleyerek boyutlandırın."}}}},
     "Tap the button to get a code. The Microsoft sign-in page doesn't open inside the app: you enter the code at microsoft.com/link in your browser.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Tap the button to get a code. The Microsoft sign-in page doesn't open inside the app: you enter the code at microsoft.com/link in your browser."}}, "tr": {"stringUnit": {"state": "translated", "value": "Düğmeye basınca bir kod alırsınız. Microsoft giriş sayfası uygulamada açılmaz: kodu tarayıcıda microsoft.com/link sayfasına yazarsınız."}}}},
     "Your code (tap to copy):": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Your code (tap to copy):"}}, "tr": {"stringUnit": {"state": "translated", "value": "Kodunuz (dokunursanız kopyalanır):"}}}},
     "Copy the code": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Copy the code"}}, "tr": {"stringUnit": {"state": "translated", "value": "Kodu kopyala"}}}},
@@ -5269,6 +5290,22 @@
         }
       }
     },
+    "or": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "or"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ya da"
+          }
+        }
+      }
+    },
     "Translate screen": {
       "localizations": {
         "en": {
@@ -6817,6 +6854,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Model"
+          }
+        }
+      }
+    },
+    "%@ is busy or did not answer in time. Try again in a moment, or choose the faster model.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ is busy or did not answer in time. Try again in a moment, or choose the faster model."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ şu an yoğun ya da zamanında yanıt vermedi. Biraz sonra yeniden deneyin ya da daha hızlı modeli seçin."
           }
         }
       }
@@ -8982,6 +9035,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "PS5 bağlı"
+          }
+        }
+      }
+    },
+    "Xbox connected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Xbox connected"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Xbox bağlı"
+          }
+        }
+      }
+    },
+    "Xbox connected · ready translation": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Xbox connected · ready translation"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Xbox bağlı · hazır çeviri"
           }
         }
       }
@@ -12682,34 +12767,34 @@
         }
       }
     },
-    "Network debugging is on (5555)": {
+    "TCP 5555 is reachable": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Network debugging is on (5555)"
+            "value": "TCP 5555 is reachable"
           }
         },
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ağ hata ayıklaması açık (5555)"
+            "value": "TCP 5555 erişilebilir"
           }
         }
       }
     },
-    "Debugging port is closed": {
+    "TCP 5555 is unreachable; wireless debugging uses a separate port": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Debugging port is closed"
+            "value": "TCP 5555 is unreachable; wireless debugging uses a separate port"
           }
         },
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Hata ayıklama portu kapalı"
+            "value": "TCP 5555 erişilemiyor; kablosuz hata ayıklama ayrı bir port kullanır"
           }
         }
       }

@@ -15,6 +15,9 @@ using Microsoft.Win32;
 
 namespace CouchSubs.App.Views;
 
+/// <summary>Ayarların doğrudan açılabilen bölümleri.</summary>
+public enum SettingsSection { Appearance, Translation }
+
 public partial class SettingsWindow : Window
 {
     private static readonly (string Code, string Name)[] Languages =
@@ -77,6 +80,7 @@ public partial class SettingsWindow : Window
         var streamBackground = controller.StreamBackground.ToString();
         StreamBackgroundChoice.SelectedItem = StreamBackgroundChoice.Items.Cast<ComboBoxItem>().First(item => (string)item.Tag == streamBackground);
         ShowArea(0);
+        ShowAreaProfile();
         // Num 8: oyunun o anki görüntüsü önizlemeye alınır.
         controller.SnapshotRequested += OnSnapshot;
         Closed += (_, _) => controller.SnapshotRequested -= OnSnapshot;
@@ -242,14 +246,58 @@ public partial class SettingsWindow : Window
         if (e.PropertyName == nameof(AppController.LastFrame)) ShowLiveFrame();
         if (e.PropertyName == nameof(AppController.InstalledPacks)) ShowPacks();
         if (e.PropertyName == nameof(AppController.Settings)) ShowShortcutTexts();
+        if (e.PropertyName is nameof(AppController.AreaProfileGame) or nameof(AppController.AreaProfileUnsaved)
+            or nameof(AppController.AreaProfileTarget))
+            ShowAreaProfile();
+        // Oyun değişince alanlar profilden gelir ya da genel alanlara dönülür: açık sekme yeni alanı gösterir.
+        if (e.PropertyName == nameof(AppController.AreaProfileGame) && !Region.IsDragging) ShowArea(area);
     }
 
-    /// <summary>Alan sekmesi açıkken önizleme oyunun görüntüsüyle saniyede bir yenilenir (çerçeve sürüklenirken beklenir).</summary>
+    /// <summary>
+    /// "Bu oyunun alanları": profil etkinse hangi oyunun alanları olduğu (kaydedilmemiş değişiklik varsa "Profile kaydet");
+    /// değilse oynanan oyuna kaydetme; oyun bilinmiyorsa nasıl kaydedileceği.
+    /// </summary>
+    private void ShowAreaProfile()
+    {
+        var text = Localizer.Current;
+        var active = controller.AreaProfileGame;
+        var target = controller.AreaProfileTarget;
+        var unsaved = controller.AreaProfileUnsaved;
+        AreaProfileText.Text = active is not null ? text.Format("These areas are saved for %@.", active)
+            : target is not null ? text["These are your general areas."]
+            : text["Areas can be saved for a game while translating, once the game being played is known."];
+        AreaProfileHint.Text = active is not null
+            ? text[unsaved ? "Your changes are not saved yet; they are dropped when translating stops." : "They come back by themselves whenever you play this game."]
+            : target is not null ? text.Format("Save them for %@ and they come back by themselves the next time you play it.", target)
+            : text["The played game is shown on the home screen; you can choose it there."];
+        AreaProfileSave.Content = active is not null ? text["Save to profile"] : target is not null ? text.Format("Save for %@", target) : "";
+        AreaProfileSave.Visibility = target is not null && (active is null || unsaved) ? Visibility.Visible : Visibility.Collapsed;
+        AreaProfileDelete.Visibility = active is not null ? Visibility.Visible : Visibility.Collapsed;
+        AreaProfileButtons.Visibility = AreaProfileSave.Visibility == Visibility.Visible || active is not null ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void OnSaveAreaProfile(object sender, RoutedEventArgs e) => controller.SaveAreaProfile();
+
+    private void OnDeleteAreaProfile(object sender, RoutedEventArgs e)
+    {
+        if (controller.AreaProfileGame is not { } game) return;
+        var text = Localizer.Current;
+        if (MessageBox.Show(this, text.Format("Delete the saved areas for %@?", game), text["Delete profile"], MessageBoxButton.YesNo,
+                            MessageBoxImage.Question) == MessageBoxResult.Yes)
+            controller.DeleteAreaProfile();
+    }
+
+    /// <summary>
+    /// Alan sekmesi açıkken önizleme oyunun görüntüsüyle saniyede dört kez yenilenir (çerçeve sürüklenirken beklenir); çerçeve
+    /// akan görüntüde yerleştirilir. Yalnız bu sekme açıkken; okuma hattına iş eklemez.
+    /// </summary>
+    private const int PreviewIntervalMs = 250;
+
     private void ShowLiveFrame()
     {
         if (!AreaTab.IsSelected || Region.IsDragging || controller.LastFrame is not { } frame) return;
         var now = Environment.TickCount64;
-        if (now - lastPreview < 1000) return;
+        if (now - lastPreview < PreviewIntervalMs) return;
         lastPreview = now;
         Region.Frame = frame;
     }
@@ -646,6 +694,17 @@ public partial class SettingsWindow : Window
     public static void Open(Window? owner, AppController controller) =>
         OwnedWindow.Show(owner, () => new SettingsWindow(controller));
 
+    /// <summary>Ayarları belli bir bölümde açar (ana ekrandaki bilgi karosunun "Çeviri" satırı).</summary>
+    public static void Open(Window? owner, AppController controller, SettingsSection section)
+    {
+        var window = OwnedWindow.Show(owner, () => new SettingsWindow(controller));
+        window.Sections.SelectedItem = section switch
+        {
+            SettingsSection.Translation => window.TranslationSection,
+            _ => window.Sections.SelectedItem,
+        };
+    }
+
     private void Update(Func<UserSettings, UserSettings> change)
     {
         if (!loading) controller.Settings = change(controller.Settings);
@@ -868,7 +927,6 @@ public partial class SettingsWindow : Window
         area = slot;
         var wasLoading = loading;
         loading = true;
-        var text = Localizer.Current;
         var settings = controller.Settings;
         if (slot == 0)
         {
@@ -879,8 +937,10 @@ public partial class SettingsWindow : Window
             ShowPreset();
             Region.IsEnabled = true;
             Region.DefaultRegion = new CropRegion();
+            KeepCentered.IsChecked = settings.KeepAreaCentered;
+            Region.Centered = settings.KeepAreaCentered;
             Region.ShowRegion(settings.Region);
-            AreaHint.Text = text["Drag on the picture to draw the area where the game shows its subtitles. Drag the edges to resize it, or the inside to move it."];
+            ShowSubtitleAreaHint();
         }
         else
         {
@@ -894,10 +954,27 @@ public partial class SettingsWindow : Window
             (settings.ExtraTarget(slot) switch { ResultTarget.Pc => ExtraPc, ResultTarget.Both => ExtraBoth, _ => ExtraTv }).IsChecked = true;
             Region.IsEnabled = extra is not null;
             Region.DefaultRegion = ExtraDefaults[slot - 1];
+            Region.Centered = false;
             Region.ShowRegion(extra ?? ExtraDefaults[slot - 1]);
             ShowAreaHint();
         }
         loading = wasLoading;
+    }
+
+    /// <summary>Altyazı alanının ipucu: "ortalı kalır" yalnız Ortada tut açıkken yazılır.</summary>
+    private void ShowSubtitleAreaHint() =>
+        AreaHint.Text = Localizer.Current[controller.Settings.KeepAreaCentered
+            ? "Drag on the picture to draw the area where the game shows its subtitles. Drag an edge or corner to resize it; it stays centered. Drag the inside to move it."
+            : "Drag on the picture to draw the area where the game shows its subtitles. Drag an edge or corner to resize it, or the inside to move it."];
+
+    /// <summary>Ortada tut: açıkken altyazı alanı ortadan boyutlanır; kapalıyken yalnız tutulan kenar oynar.</summary>
+    private void OnKeepCentered(object sender, RoutedEventArgs e)
+    {
+        if (loading || area != 0) return;
+        var on = KeepCentered.IsChecked == true;
+        Update(s => s with { KeepAreaCentered = on });
+        Region.Centered = on;
+        ShowSubtitleAreaHint();
     }
 
     private void OnExtraTarget(object sender, RoutedEventArgs e)

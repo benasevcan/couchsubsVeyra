@@ -39,6 +39,7 @@ struct HistoryScreen: View {
                         Label(copiedAll ? "Copied" : "Copy all", systemImage: copiedAll ? "checkmark" : "doc.on.doc")
                     }
                     .buttonStyle(.mobileSecondary)
+                    .resetsAfterDelay($copiedAll)
                     Button(role: .destructive) { confirmClear = true } label: { Label("Clear", systemImage: "trash") }
                         .buttonStyle(.mobileDestructive)
                 }
@@ -84,6 +85,51 @@ private struct HistoryRow: View {
     }
 }
 
+/// Ayarlar › Bu oyunun alanları: alanlar oynanan oyuna kaydedilir, o oyun yeniden oynanınca kendiliğinden gelir (Mac'teki
+/// AreaProfileCard, Windows ve Android ile aynı).
+struct AreaProfileTile: View {
+    @ObservedObject var areas: GameAreas
+    @EnvironmentObject private var model: PhoneModel
+    @State private var confirmDelete = false
+
+    var body: some View {
+        let active = model.settings.activeAreaProfile == nil ? nil : areas.activeGame
+        let target = areas.target
+        let unsaved = model.settings.areasDifferFromProfile
+        Tile {
+            Text("Areas for this game").font(Mobile.TypeScale.headline)
+            if let active {
+                Text(verbatim: String(format: String(localized: "These areas are saved for %@."), active)).font(Mobile.TypeScale.body)
+                hint(String(localized: unsaved ? "Your changes are not saved yet; they are dropped when translating stops."
+                                               : "They come back by themselves whenever you play this game."))
+            } else if let target {
+                Text("These are your general areas.").font(Mobile.TypeScale.body)
+                hint(String(format: String(localized: "Save them for %@ and they come back by themselves the next time you play it."), target))
+            } else {
+                Text("Areas can be saved for a game while translating, once the game being played is known.").font(Mobile.TypeScale.body)
+                hint(String(localized: "The played game is shown on the home screen; you can choose it there."))
+            }
+            if let target, active == nil || unsaved {
+                Button(active == nil ? String(format: String(localized: "Save for %@"), target) : String(localized: "Save to profile")) {
+                    areas.save()
+                }
+                .buttonStyle(.mobileSecondary)
+            }
+            if active != nil {
+                Button("Delete profile") { confirmDelete = true }.buttonStyle(.mobileDestructive)
+            }
+        }
+        .confirmationDialog(String(format: String(localized: "Delete the saved areas for %@?"), active ?? ""), isPresented: $confirmDelete) {
+            Button("Delete profile", role: .destructive) { areas.delete() }
+        }
+    }
+
+    private func hint(_ value: String) -> some View {
+        Text(verbatim: value).font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 /// Ayarlar › Altyazı alanı: hazır seçimler, son kareyle canlı önizleme (çerçeve sürüklenir), Özel'de kaydırıcılar.
 struct AreaTile: View {
     @EnvironmentObject private var model: PhoneModel
@@ -103,8 +149,19 @@ struct AreaTile: View {
                     model.settings.setCustomRegion(model.settings.region.withVertical(position: percent.position, height: $0))
                 }
             }
-            Text("Drag the frame to move it, or drag its corner to resize it.")
-                .font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
+            Toggle(isOn: $model.settings.keepAreaCentered) {
+                Text("Keep centered").font(Mobile.TypeScale.headline)
+            }
+            .tint(Mobile.Palette.accent)
+            // "Ortalı kalır" yalnız Ortada tut açıkken yazılır.
+            Group {
+                if model.settings.keepAreaCentered {
+                    Text("Drag the frame to move it, or drag an edge or corner to resize it; the subtitle area stays centered.")
+                } else {
+                    Text("Drag the frame to move it, or drag an edge or corner to resize it.")
+                }
+            }
+            .font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
         }
     }
 
@@ -164,7 +221,11 @@ private struct ExtraAreaEditor: View {
                                                            set: { on in settings.updateExtraArea(id: id) { $0.enabled = on } }))
                         .labelsHidden()
                         .tint(Mobile.Palette.accent)
-                    Button { settings.removeExtraArea(id: id) } label: { Image(systemName: "trash") }
+                    Button { settings.removeExtraArea(id: id) } label: {
+                        Image(systemName: "trash")
+                            .frame(width: Mobile.Control.icon, height: Mobile.Control.icon)
+                            .contentShape(Rectangle())
+                    }
                         .foregroundStyle(Mobile.Palette.secondary)
                         .accessibilityLabel(Text("Remove"))
                 }
@@ -208,6 +269,6 @@ private struct PhoneRegionPreview: View {
     @ObservedObject var preview: PhoneFramePreview
 
     var body: some View {
-        RegionPreview(region: settings.region, frame: preview.image) { settings.setCustomRegion($0) }
+        RegionPreview(region: settings.region, frame: preview.image, centered: settings.keepAreaCentered) { settings.setCustomRegion($0) }
     }
 }

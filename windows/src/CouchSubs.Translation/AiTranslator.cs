@@ -36,6 +36,11 @@ public static class AiRequest
         "Characters address each other informally (use \"sen\", not \"siz\") unless the line is clearly formal. " +
         "Keep character names, place names and speaker labels such as \"ATREUS:\" exactly as they are. " +
         "Keep line breaks. Keep the meaning and tone; do not add or leave out anything. " +
+        // #296: OCR kaçan/yanlış harfler ve önceki altyazının devamı olan satırlar.
+        "The text is read from the screen by OCR and may have misread or missing letters (\"Y u ave to ask?\", " +
+        "\"Doesn't 00k good.\"); translate the line the speaker clearly meant. " +
+        "A subtitle may continue the previous one (it starts in lowercase or with a word like \"and\"); " +
+        "translate it so that it reads as that continuation. " +
         "Reply with only the translation, no explanations, notes or quotes.";
 
     /// <summary>Kullanıcının ek talimatında en çok bu kadar karakter gider (fazlası kesilir).</summary>
@@ -345,6 +350,8 @@ public static class AiRequest
             400 when message.Contains("api_key_invalid") || message.Contains("api key not valid") => OnlineKeyState.Invalid,
             400 when message.Contains("credit balance") || message.Contains("insufficient_quota") => OnlineKeyState.QuotaExceeded,
             400 or 404 => OnlineKeyState.ModelRejected,
+            // Hizmete ulaşıldı ama şu an yoğun ya da arızalı (Gemini 503 "overloaded", Claude 529); internet çalışıyor.
+            408 or (>= 500 and <= 599) => OnlineKeyState.Busy,
             _ => OnlineKeyState.Unreachable,
         };
     }
@@ -417,8 +424,16 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
 {
     /// <summary>Bağlama giden önceki satır sayısı.</summary>
     internal const int ContextLines = 3;
-    /// <summary>Hata sonrası bu süre hizmet denenmez.</summary>
+    /// <summary>Hata sonrası bu süre hizmet denenmez (bulut hizmetlerinin kotası için).</summary>
     private static readonly TimeSpan RetryAfter = TimeSpan.FromMinutes(1);
+    /// <summary>
+    /// Yerel modelde hata sonrası bekleme. Kota yoktur, sunucu çoğunlukla hemen düzelir (zaman aşımı, bozuk JSON, an
+    /// meşgul): tek bir hata bir dakika boyunca bütün satırları yedek çeviriye düşürmesin, yalnız birkaç satırı etkilesin.
+    /// Askıda kalan sunucuda da bekleme sürer: her satır <see cref="LocalTimeout"/> kadar beklemez, sıra dolmaz.
+    /// </summary>
+    internal static readonly TimeSpan LocalRetryAfter = TimeSpan.FromSeconds(5);
+    /// <summary>Hata sonrası hizmetin denenmediği süre: yerel modelde <see cref="LocalRetryAfter"/>, bulutta bir dakika (testler kısaltır).</summary>
+    internal TimeSpan ErrorPause { get; init; }
     /// <summary>Dakikalık sınır aşılınca en çok bu kadar beklenir (hizmet bekleme önermezse de bu kadar).</summary>
     public static readonly TimeSpan RateLimitPause = TimeSpan.FromSeconds(20);
     /// <summary>Denemede çevrilen örnek satır.</summary>
@@ -491,6 +506,7 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         _instruction = AiRequest.Instruction(instruction);
         _instructionTag = AiRequest.InstructionTag(_instruction);
         Provider = provider;
+        ErrorPause = provider.IsLocal() ? LocalRetryAfter : RetryAfter;
         Model = provider.Model(model);
         Server = provider.IsLocal() ? server ?? LocalAiServer.Create(LocalAiServer.OllamaUrl, Model.Id) : null;
         _key = key.Trim();
@@ -584,8 +600,8 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         catch (Exception error) when (error is HttpRequestException or TaskCanceledException or AiException
                                       && !cancellationToken.IsCancellationRequested)
         {
-            Report(error is AiException ai ? ai.State : OnlineKeyState.Unreachable);
-            _pausedUntil = DateTimeOffset.UtcNow + RetryAfter;
+            Report(StateOf(error));
+            _pausedUntil = DateTimeOffset.UtcNow + ErrorPause;
             _pauseRateLimited = false;
             return Remember(await FallbackAsync(text, cancellationToken).ConfigureAwait(false), text, game);
         }
@@ -593,11 +609,19 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         for (var i = 0; i < missing.Count; i++)
         {
             var piece = pieces[missing[i]].Text;
-            if (IsEcho(piece, translated[i]) && await TryFallbackAsync(piece, cancellationToken).ConfigureAwait(false) is { } retried
-                && !IsEcho(piece, retried))
+            // Model dizide bu cümleyi boş bıraktıysa (bozuk OCR okumasında olabiliyor, #296) yanıt yok sayılır.
+            var empty = string.IsNullOrWhiteSpace(translated[i]);
+            if ((empty || IsEcho(piece, translated[i])) && await TryFallbackAsync(piece, cancellationToken).ConfigureAwait(false) is { } retried
+                && !string.IsNullOrWhiteSpace(retried) && !IsEcho(piece, retried))
             {
                 // Yerel çeviri bu motorun önbelleğine yazılmaz.
                 translations[missing[i]] = retried;
+                local = true;
+                continue;
+            }
+            if (empty)
+            {
+                // Yerel çeviri de yoksa cümle olduğu gibi kalır; boş satır gösterilmez, sonuç önbelleğe yazılmaz.
                 local = true;
                 continue;
             }
@@ -681,8 +705,8 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
             catch (Exception error) when (error is HttpRequestException or TaskCanceledException or AiException
                                           && !cancellationToken.IsCancellationRequested)
             {
-                Report(error is AiException ai ? ai.State : OnlineKeyState.Unreachable);
-                _pausedUntil = DateTimeOffset.UtcNow + RetryAfter;
+                Report(StateOf(error));
+                _pausedUntil = DateTimeOffset.UtcNow + ErrorPause;
                 _pauseRateLimited = false;
                 failed = true;
             }
@@ -783,6 +807,17 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         }
     }
 
+    /// <summary>
+    /// İstek hatasının kullanıcıya gösterilen türü. Zaman aşımı (HttpClient'ın <see cref="TaskCanceledException"/>'ı;
+    /// kullanıcının iptali buraya gelmez) yoğunluk sayılır: hizmete ulaşıldı ama yanıt zamanında gelmedi.
+    /// </summary>
+    internal static OnlineKeyState StateOf(Exception error) => error switch
+    {
+        AiException ai => ai.State,
+        TaskCanceledException => OnlineKeyState.Busy,
+        _ => OnlineKeyState.Unreachable,
+    };
+
     private string[] Read(HttpResponseMessage response, string body, int count)
     {
         if (!response.IsSuccessStatusCode)
@@ -814,7 +849,7 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         catch (FailedException)
         {
             // Dakikalık sınıra takıldıysa anahtar geçerlidir ama şu an sınırdadır.
-            return new(translator.LastError ?? (translator.LastLineWasRateLimited ? OnlineKeyState.QuotaExceeded : OnlineKeyState.Unreachable));
+            return new(translator.LastError ?? (translator.LastLineWasRateLimited ? OnlineKeyState.Busy : OnlineKeyState.Unreachable));
         }
     }
 

@@ -92,7 +92,8 @@ Windows'ta aynı sayılar efektif piksel (epx) olarak kullanılır.
 | `code` | 22 | yarı kalın, eş genişlikli rakam | PS5 eşleme kodu |
 
 Altyazı içeriği arayüz değil içeriktir: canlı altyazı karosunda son satır 28 pt yarı kalın ve altyazı sarısında
-(`accentText`), öncekiler 17 pt normal ve `textSecondary` renginde (opaklıkla soldurulmaz). Paragraflarda satır arası yazı boyutunun yaklaşık 1,3 katıdır. 13 pt'nin altı
+(`accentText`), öncekiler 17 pt normal ve `textSecondary` renginde, altlarındaki özgün metin `caption` (opaklıkla
+soldurulmaz; çeviri ile özgün metin boyla ayrılır). Paragraflarda satır arası yazı boyutunun yaklaşık 1,3 katıdır. 13 pt'nin altı
 kullanılmaz.
 
 ## Boşluk ve biçim
@@ -142,10 +143,12 @@ Her iki platformda aynı adla bulunur.
 - **NumberedRow** – 28 pt `surface2` dairede numara (`textPrimary`), yanında `body` metin.
 - **StatusRow** – 10 pt durum noktası, kalın ad, sağda değer. Nokta: bağlı `success`, çeviri sürerken
   bağlantı yok `warning`, çeviri başlamamışken `textSecondary` (boşta olmak uyarı değildir).
-- **Metin alanı** – `surface2` zemin, 1 pt `border` çerçeve, `control` köşe, en az 40 yükseklik; PS5 kodu
-  alanı 52 yükseklik ve `code` yazı. Etiketi alanın üstünde `callout`/`textSecondary`.
+- **Metin alanı** – `surface2` zemin, 1 pt `border` çerçeve (odaktayken `accent`), `control` köşe, en az 40 yükseklik;
+  PS5 kodu alanı 52 yükseklik ve `code` yazı. Etiketi alanın üstünde `callout`/`textSecondary`.
 - **Bölmeli seçim** – 2–4 seçenek: `surface2` ray (`control` köşe, 4 iç boşluk), seçili parça yükseltilmiş zemin
   (`inner` köşe) ve yarı kalın yazı; halka ve parıltı yok (Mac'te sistemin büyük boy segmented denetimi).
+  Telefonda seçili parça ayrıca 1 pt `accent` çerçeve alır: küçük ekranda yükseltilmiş zemin ile ray arasındaki fark
+  (yaklaşık 1,2:1) tek başına seçimi belli etmiyor.
 - **Seçenek karoları** – her seçeneğin kısa notu olan seçim (çeviri motoru): yan yana küçük karolar (ad
   `headline`, not `caption`), seçili olan *etkin* karo.
 - **Anahtar** – açık/kapalı ayarlar (oyun paketleri, ortak havuz): başlık (`body`) solda, anahtar sağda. Açık/kapalı
@@ -164,8 +167,8 @@ Her iki platformda aynı adla bulunur.
 ## Ekranlar
 
 **Kurulum sihirbazı**: solda kenar çubuğu (logo + "Kurulum"; adımlar: biten adım yeşil dairede onay, sıradaki adım sarı
-dairede numara ve `surface2` zeminli satır, gelecek adım gri numaralı; altta "Adım n / toplam" ve ilerleme çubuğu); sağda adımın karosu
-(kaydırılabilir StepLayout), altında solda "Geri" (ikincil), sağda "Devam" (birincil). Son adım isteğe bağlı "Daha iyi çeviri (ücretsiz)": tek cümle
+dairede numara ve `surface2` zeminli satır, gelecek adım gri numaralı; altta "Adım n / toplam" ve ilerleme çubuğu); sağda adım
+(kaydırılabilir StepLayout; Ayarlar sayfası gibi başlık zeminde, bloklar kendi karolarında, dış karo yok), altında solda "Geri" (ikincil), sağda "Devam" (birincil). Son adım isteğe bağlı "Daha iyi çeviri (ücretsiz)": tek cümle
 açıklama, numaralı üç satır ve "Ücretsiz anahtar al" (birincil, Google AI Studio'nun anahtar sayfası),
 gizli anahtar alanı ve "Kaydet ve dene" (ikincil), altta veri kullanımı ve dakikalık sınır HintText'i.
 Anahtar yokken alttaki düğme "Şimdilik geç" (ikincil) olur; kaydedilince "Gemini hazır" (DoneLabel) ve "Devam".
@@ -175,12 +178,13 @@ Sol sütun: "Çeviriyi başlat" (birincil) ya da "Çeviriyi durdur" (tehlikeli),
 karolar: PS5 ve TV durum karoları (altyazı yalnız bilgisayar ekranındaysa TV karosu yoktur; TV seçili ama bağlı
 değilse "Kurulmadı" ve "TV bağla"), iki sütun genişliğinde "Altyazıyı göster: TV / Bilgisayar ekranı / İkisi de"
 karosu (bilgisayar ekranı seçiliyse "Tıklamalar geçsin" ve "Altyazı penceresini ayarla"), iki satırlı bilgi karosu:
-"Çeviri" (seçili motor ve `›`; Ayarlar › Çeviri'yi açar) ve "Ekranı çevir" (tuşlar: Windows'ta `Num 9` ya da
-`Ctrl+Shift+9`, Mac'te `⌥⌘T`); gerekiyorsa uyarı karoları (dil paketi, çevrimiçi motor, yazı tanıma).
+"Çeviri" (seçili motor ve `›`; Ayarlar › Çeviri'yi açar) ve "Ekranı çevir" (seçili kısayollar, her biri bir tuş:
+Windows'ta varsayılan `Num 9` ya da `Ctrl+Shift+9`, Ayarlar › Kısayollar'dan değişir, hiç yoksa "kısayol yok"; Mac'te
+`⌥⌘T`); gerekiyorsa uyarı karoları (dil paketi, çevrimiçi motor, yazı tanıma).
 Sağ sütun: oyun paketleri açıksa (İngilizce→Türkçe, paket kurulu) paket karosu (mor paket simgesi) "Oyun paketleri
 açık · n oyunun çevirisi hazır"; altında kalan yüksekliği dolduran "Canlı altyazı" karosu: son çeviri 28 pt altyazı
-sarısında, altında özgün metin `caption`; önceki satırlar ayraçlarla, `textSecondary` renginde ve kaydırılabilir.
-Çeviri sürerken sağ üstte "Çevriliyor" (atan nokta + kelime). Karo parlamaz.
+sarısında, altında özgün metin `caption`; önceki satırlar ayraçlarla, 17 pt ve kaydırılabilir. Yeni satır 0,18 sn
+solarak gelir (azaltılmış harekette geçiş yok). Çeviri sürerken sağ üstte "Çevriliyor" (atan nokta + kelime). Karo parlamaz.
 
 **Telefon ana ekranı** (iPhone ve Android aynı): PS5 ve Altyazı durum karoları (dokununca ilgili ayar açılır,
 sağ üstte `›`), paket karosu (başlık ve not tek satır, sağda yalnız `›`; paketler kapalıysa nötr "Kapalı" etiketi),

@@ -256,6 +256,25 @@ public sealed class SubtitleServer(int port = 8787, TimeSpan? pingInterval = nul
     }
 
     /// <summary>
+    /// TV uygulamasını kapatır; çeviri durduğunda TV kendi girişine (HDMI) döner. Yalnız TV'lere gider, OBS gibi
+    /// izleyicilere gitmez. Dönen görev mesaj bütün TV'lere yazılınca (ya da yazılamayınca) biter; kapanışta sunucu
+    /// durdurulmadan önce kısa süre beklenebilir.
+    /// </summary>
+    public Task ExitTvApp()
+    {
+        var frame = Frame("exit", new SortedDictionary<string, object>());
+        List<Client> targets;
+        lock (gate) targets = [.. clients.Where(c => !c.Viewer)];
+        if (targets.Count == 0) return Task.CompletedTask;
+        // Çağıranın eşzamanlama bağlamına dönülmez: kapanışta arayüz iş parçacığı bu görevi bekleyebilir.
+        return Task.Run(() => Task.WhenAll(targets.Select(async client =>
+        {
+            try { await Write(client, frame); }
+            catch { Remove(client); }
+        })));
+    }
+
+    /// <summary>
     /// "Ekranı çevir" sonuçları: <c>screen</c> olayı her çeviriyi yazının yeri (<c>box</c>), tipik satır yüksekliği
     /// (<c>line</c>, ekrana oranla) ve çok parçalıysa <c>paragraphs</c> ile taşır. TV öncekinin yerine bunları koyar.
     /// </summary>

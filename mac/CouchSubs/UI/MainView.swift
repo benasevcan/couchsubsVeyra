@@ -46,7 +46,9 @@ struct MainView: View {
         }
         .padding(Theme.space("screen"))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .sheet(isPresented: $model.showSettings) { SettingsView().appSurface() }
+        .sheet(isPresented: $model.showSettings, onDismiss: { model.settingsSection = .appearance }) {
+            SettingsView(section: model.settingsSection).appSurface()
+        }
         .sheet(isPresented: $model.showHistory) { HistoryView().appSurface() }
     }
 }
@@ -94,7 +96,7 @@ struct ControlsColumn: View {
     }
 }
 
-/// Sol sütun: başlat/durdur, PS5 ve TV, altyazının yeri, çeviri motoru, kısayol, uyarılar.
+/// Sol sütun: başlat/durdur, PS5 ve TV, altyazının yeri, çeviri motoru ve kısayol (bilgi karosu), uyarılar.
 struct MainControls: View {
     @EnvironmentObject private var model: AppModel
 
@@ -111,13 +113,14 @@ struct MainControls: View {
                 if model.settings.output.showsOnTV { TVStatusTile() }
             }
             .fixedSize(horizontal: false, vertical: true)
-            if model.isRunning { GameSection(choice: model.gameChoice) }
+            if model.isRunning { GameSection(choice: model.gameChoice, areas: model.gameAreas) }
             SubtitleOutputCard()
-            HStack(alignment: .top, spacing: Theme.space("gap")) {
-                StatusTile(symbol: "globe", title: "Translation", value: engineName)
-                StatusTile(symbol: "keyboard", title: "Shortcut", value: String(localized: "Translate the screen (⌥⌘T)"))
+            // Ayar bilgisi durum karosu gibi değil, satır olarak durur (TASARIM.md › InfoCard).
+            InfoCard {
+                InfoRow("Translation", value: engineName, action: { model.openSettings(.translation) })
+                InfoDivider()
+                InfoRow("Translate screen") { Keycap("⌥⌘T") }
             }
-            .fixedSize(horizontal: false, vertical: true)
             MainWarnings()
         }
     }
@@ -264,16 +267,18 @@ private struct PackInUseTile: View {
     }
 }
 
-/// Son altyazı büyük ve altyazı sarısında, öncekiler altında ikincil renkte; çeviri sürerken sağ üstte canlı nokta.
+/// Son altyazı büyük ve altyazı sarısında, öncekiler altında daha küçük (özgün metinleri ikincil renkte); çeviri sürerken
+/// sağ üstte canlı nokta.
 private struct LiveSubtitlesTile: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.space("gap")) {
             HStack {
                 Text("Live subtitles").font(.csHeadline)
                 Spacer()
-                if model.isRunning { Pill(text: String(localized: "Translating…"), tone: .success, live: true) }
+                if model.isRunning { Pill(text: String(localized: "Translating…"), live: true) }
             }
             if model.lastTranslation.isEmpty {
                 HintText(text: "Subtitles will appear here while you play.")
@@ -282,7 +287,13 @@ private struct LiveSubtitlesTile: View {
                     HintText(text: "When you turn on the controller to play, choose your MAIN account on the PS5. Don't play with the second account CouchSubs signs in with, or the controller won't work in the game.")
                 }
             } else {
-                CurrentLine(translation: model.lastTranslation, source: model.lastSource)
+                // Yeni satır kısa bir geçişle belirir (azaltılmış harekette geçiş yok); eskisiyle üst üste biner, karo zıplamaz.
+                ZStack(alignment: .topLeading) {
+                    CurrentLine(translation: model.lastTranslation, source: model.lastSource)
+                        .id(model.lastTranslation)
+                        .transition(.opacity)
+                }
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: model.lastTranslation)
                 if let metrics = model.lastMetrics { MetricsRow(metrics: metrics) }
                 SubtitleHistoryList()
             }
@@ -300,7 +311,8 @@ private struct CurrentLine: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.space("hair")) {
             Text(verbatim: translation)
-                .font(.system(size: 28, weight: .semibold))
+                // Altyazı içeriği: 28 pt yarı kalın (`display` ile aynı boy), altyazı sarısında.
+                .font(.csDisplay)
                 .foregroundStyle(Color.csAccentText)
                 .fixedSize(horizontal: false, vertical: true)
             Text(verbatim: source)
@@ -357,6 +369,7 @@ private struct HistoryRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.space("hair")) {
+            // Önceki çeviri 17 pt ikincil renkte, özgün metin küçük (docs/TASARIM.md › Yazı); canlı satır tek vurgu kalır.
             Text(verbatim: entry.translation)
                 .font(.csHeadline.weight(.regular))
                 .foregroundStyle(Color.csSecondary)

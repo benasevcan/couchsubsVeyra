@@ -9,13 +9,29 @@ import org.json.JSONException
 import org.json.JSONObject
 import java.io.IOException
 import java.net.HttpURLConnection
+import java.net.SocketTimeoutException
 import java.net.URL
 import java.net.URLEncoder
 import java.security.MessageDigest
 import java.util.Locale
 
 /** Çevrimiçi anahtarın durumu (ayarlardaki "Dene" ve ana ekrandaki uyarı için). */
-enum class OnlineKeyState { VALID, INVALID, QUOTA_EXCEEDED, MODEL_REJECTED, UNREACHABLE }
+/**
+ * Çevrimiçi çeviri anahtarı denendiğinde ne çıktı. BUSY: hizmete ulaşıldı ama şu an yoğun (5xx), yanıt zamanında
+ * gelmedi ya da dakikalık sınıra takıldı; anahtar reddedilmedi, internet de çalışıyor (Windows/Mac ile aynı).
+ */
+enum class OnlineKeyState {
+    VALID, INVALID, QUOTA_EXCEEDED, MODEL_REJECTED, UNREACHABLE, BUSY;
+
+    companion object {
+        /** İstek hatasının türü: zaman aşımı yoğunluktur (hizmete ulaşıldı, yanıt gelmedi), diğer ağ hataları ulaşılamadır. */
+        fun of(error: Exception): OnlineKeyState = when (error) {
+            is OnlineException -> error.state
+            is SocketTimeoutException -> BUSY
+            else -> UNREACHABLE
+        }
+    }
+}
 
 /** [rateLimited]: hizmet 429 döndü (DeepL: çok sık istek); bekleme süresince istek gönderilmez. */
 class OnlineException(val state: OnlineKeyState, val rateLimited: Boolean = false) : IOException("online translation failed: $state")
@@ -94,7 +110,8 @@ object KeyCheck {
     const val SAMPLE = "KRATOS: We go now. Stay close, boy."
 
     fun accepted(state: OnlineKeyState) =
-        state == OnlineKeyState.VALID || state == OnlineKeyState.QUOTA_EXCEEDED || state == OnlineKeyState.MODEL_REJECTED
+        state == OnlineKeyState.VALID || state == OnlineKeyState.QUOTA_EXCEEDED || state == OnlineKeyState.MODEL_REJECTED ||
+            state == OnlineKeyState.BUSY
 
     /** DeepL: /usage; bu ay kota dolduysa QUOTA_EXCEEDED. Bloklar. */
     fun deepL(key: String, http: Http = Http.Default): OnlineKeyState {
@@ -121,13 +138,12 @@ object KeyCheck {
         return try {
             val request = AiRequest.build(provider, key, model, listOf(SAMPLE), emptyList())
             val (status, body) = http.send("POST", request.url, request.headers, request.body, 15000)
-            if (status !in 200..299) return AiRequest.failure(status, body)
+            // Dakikalık sınıra takıldıysa anahtar geçerlidir, hizmet şu an yoğundur (bakiye bitmedi).
+            if (status !in 200..299) return if (AiRequest.rateLimit(status, body) != null) OnlineKeyState.BUSY else AiRequest.failure(status, body)
             AiRequest.translations(AiRequest.text(provider, body), 1)
             OnlineKeyState.VALID
-        } catch (error: OnlineException) {
-            error.state
         } catch (error: IOException) {
-            OnlineKeyState.UNREACHABLE
+            OnlineKeyState.of(error)
         } catch (error: JSONException) {
             OnlineKeyState.UNREACHABLE
         }
@@ -243,7 +259,7 @@ abstract class SentenceTranslator<C>(
             rateLimited(error.limit)
             return fallback(text, game)
         } catch (error: IOException) {
-            report((error as? OnlineException)?.state ?: OnlineKeyState.UNREACHABLE)
+            report(OnlineKeyState.of(error))
             pausedUntil = clock() + RETRY_AFTER_MS
             pauseRateLimited = (error as? OnlineException)?.rateLimited == true
             return fallback(text, game)
@@ -256,14 +272,21 @@ abstract class SentenceTranslator<C>(
         var local = false
         for ((i, index) in missing.withIndex()) {
             val piece = pieces[index].text
-            if (retriesEcho && isEcho(piece, translated[i])) {
+            // Model dizide bu cümleyi boş bıraktıysa (bozuk OCR okumasında olabiliyor, #296) yanıt yok sayılır.
+            val empty = translated[i].isBlank()
+            if (retriesEcho && (empty || isEcho(piece, translated[i]))) {
                 val retried = tryLocal(piece)
-                if (retried != null && !isEcho(piece, retried)) {
+                if (retried != null && retried.isNotBlank() && !isEcho(piece, retried)) {
                     // Yerel çeviri bu motorun önbelleğine yazılmaz.
                     translations[index] = retried
                     local = true
                     continue
                 }
+            }
+            if (empty) {
+                // Yerel çeviri de yoksa cümle olduğu gibi kalır; boş satır gösterilmez, sonuç önbelleğe yazılmaz.
+                local = true
+                continue
             }
             translations[index] = translated[i]
             cache.store(cacheKey(piece, game), translated[i])
@@ -319,7 +342,7 @@ abstract class SentenceTranslator<C>(
     /** Toplu çeviri hata verdi: hata bildirilir ve bir dakika hizmet denenmez (dakikalık sınırda uyarısız, kısa). */
     protected fun failed(error: Exception) {
         if (error is AiRateLimitedException) return rateLimited(error.limit)
-        report((error as? OnlineException)?.state ?: OnlineKeyState.UNREACHABLE)
+        report(OnlineKeyState.of(error))
         pausedUntil = clock() + RETRY_AFTER_MS
         pauseRateLimited = (error as? OnlineException)?.rateLimited == true
     }
@@ -437,6 +460,11 @@ object AiRequest {
             "Characters address each other informally (use \"sen\", not \"siz\") unless the line is clearly formal. " +
             "Keep character names, place names and speaker labels such as \"ATREUS:\" exactly as they are. " +
             "Keep line breaks. Keep the meaning and tone; do not add or leave out anything. " +
+            // #296: OCR kaçan/yanlış harfler ve önceki altyazının devamı olan satırlar.
+            "The text is read from the screen by OCR and may have misread or missing letters (\"Y u ave to ask?\", " +
+            "\"Doesn't 00k good.\"); translate the line the speaker clearly meant. " +
+            "A subtitle may continue the previous one (it starts in lowercase or with a word like \"and\"); " +
+            "translate it so that it reads as that continuation. " +
             "Reply with only the translation, no explanations, notes or quotes."
 
     /** Kullanıcının ek talimatında en çok bu kadar karakter gider (fazlası kesilir). */
@@ -680,6 +708,8 @@ object AiRequest {
             status == 400 && ("api_key_invalid" in message || "api key not valid" in message) -> OnlineKeyState.INVALID
             status == 400 && ("credit balance" in message || "insufficient_quota" in message) -> OnlineKeyState.QUOTA_EXCEEDED
             status == 400 || status == 404 -> OnlineKeyState.MODEL_REJECTED
+            // Hizmete ulaşıldı ama şu an yoğun ya da arızalı (Gemini 503 "overloaded", Claude 529); internet çalışıyor.
+            status == 408 || status in 500..599 -> OnlineKeyState.BUSY
             else -> OnlineKeyState.UNREACHABLE
         }
     }

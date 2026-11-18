@@ -23,6 +23,18 @@ class PoolPackTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             pp.wrangler("DELETE FROM lines")
 
+    def test_generated_read_queries_reject_unbounded_or_invalid_limits(self):
+        for n in (0, -1, -100):
+            with self.subTest(value=n):
+                with self.assertRaises(SystemExit):
+                    pp.titles_sql(limit=n)
+                with self.assertRaises(SystemExit):
+                    pp.query_sql(title="PPSA12345", limit=n)
+                with self.assertRaises(SystemExit):
+                    pp.query_sql(title="PPSA12345", min_installs=n)
+        self.assertIn("LIMIT 50", pp.titles_sql(50))
+        self.assertIn("LIMIT 5000", pp.query_sql(title="PPSA12345"))
+
     def test_clean_merges_sorts_and_drops_noise(self):
         rows = [
             {"text": "LUCIA: Get in the car, Jason.", "installs": 3},
@@ -47,6 +59,22 @@ class PoolPackTests(unittest.TestCase):
             a.write_text(json.dumps([{"results": [{"text": "One two.", "installs": 2}], "success": True}]))
             b.write_text(json.dumps({"lines": [{"text": "One two.", "installs": 2}]}))
             self.assertEqual(pp.load_export(a), pp.load_export(b))
+
+    def test_rejects_failed_d1_exports_and_invalid_line_collections(self):
+        bad = [
+            [{"success": False, "error": "remote D1 query failed", "results": []}],
+            [{"success": False, "results": [{"text": "We need to leave."}]}],
+            {"lines": None},
+            {"lines": "not a line array"},
+            [{"success": True, "results": None}],
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "export.json"
+            for result in bad:
+                with self.subTest(payload=result):
+                    path.write_text(json.dumps(result), encoding="utf-8")
+                    with self.assertRaises(SystemExit):
+                        pp.load_export(path)
 
     def test_dry_run_never_translates(self):
         with tempfile.TemporaryDirectory() as d:

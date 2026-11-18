@@ -213,12 +213,15 @@ public struct LocalAIServer: Equatable, Sendable {
 public enum AIFailure: Error, Equatable, Sendable {
     /// Anahtar reddedildi (401/403 ya da Gemini'de "API key not valid").
     case invalidKey
-    /// Bakiye bitti, aylık sınır ya da dakikalık istek sınırı aşıldı (429, 402, Claude'da "credit balance").
+    /// Bakiye bitti ya da günlük/aylık sınır aşıldı (429, 402, Claude'da "credit balance").
     case quotaExceeded
     /// Hizmet isteği kabul etmedi (400, 404); ör. listedeki model hesapta açık değil.
     case modelRejected
-    /// Ağ hatası, zaman aşımı, hizmet arızası ya da anlaşılmayan yanıt.
+    /// Ağ hatası (bağlantı kurulamadı) ya da anlaşılmayan yanıt.
     case unreachable
+    /// Hizmete ulaşıldı ama şu an yoğun (5xx, Gemini 503 "overloaded", Claude 529), yanıt zamanında gelmedi ya da
+    /// "Dene" dakikalık sınıra takıldı. Anahtar reddedilmedi, internet de çalışıyor.
+    case busy
 }
 
 /// Hizmetin bildirdiği dakikalık istek sınırı aşımı (429). Gün sınırından farklı olarak kısa sürer; kullanıcıya hata
@@ -264,6 +267,10 @@ public enum AIRequest {
         Characters address each other informally (use "sen", not "siz") unless the line is clearly formal. \
         Keep character names, place names and speaker labels such as "ATREUS:" exactly as they are. \
         Keep line breaks. Keep the meaning and tone; do not add or leave out anything. \
+        The text is read from the screen by OCR and may have misread or missing letters ("Y u ave to ask?", \
+        "Doesn't 00k good."); translate the line the speaker clearly meant. \
+        A subtitle may continue the previous one (it starts in lowercase or with a word like "and"); \
+        translate it so that it reads as that continuation. \
         Reply with only the translation, no explanations, notes or quotes.
         """
 
@@ -523,6 +530,8 @@ public enum AIRequest {
             if message.contains("credit balance") || message.contains("insufficient_quota") { return .quotaExceeded }
             return .modelRejected
         case 404: return .modelRejected
+        // Hizmete ulaşıldı ama şu an yoğun ya da arızalı; internet çalışıyor.
+        case 408, 500...599: return .busy
         default: return .unreachable
         }
     }
@@ -555,17 +564,24 @@ public enum AIRequest {
 
 /// Yapay zekâ çevirisinin ortak çekirdeği: önbellek, bağlam, cümle bölme, hata sonrası bekleme ve yerel çeviriye düşme.
 /// Uygulamadaki `AITranslator` bunu çeviri protokolüne bağlar. Hata olursa o satır yerel (ücretsiz) motorla çevrilir ve
-/// bir dakika hizmet denenmez; her satırda zaman aşımı beklenmez. Yerel çeviriler bu motorun önbelleğine yazılmaz.
+/// bir dakika (yerel modelde 5 sn) hizmet denenmez; her satırda zaman aşımı beklenmez. Yerel çeviriler bu motorun
+/// önbelleğine yazılmaz.
 /// Bir altyazının çevrilmemiş bütün cümleleri tek istekte gider. Ücretsiz katmanın dakikalık sınırı için model listesindeki
 /// `requestsPerMinute` kadar istek hakkı vardır; hak bitince o satır sessizce (hata göstermeden) yerel çeviriyle çevrilir.
 public final class AITranslationCore: @unchecked Sendable {
     /// Bağlama giden önceki satır sayısı.
     public static let contextLines = 3
-    /// Hata sonrası bu süre hizmet denenmez.
+    /// Hata sonrası bu süre hizmet denenmez (bulut hizmetlerinin kotası için).
     public static let retryAfter: TimeInterval = 60
+    /// Yerel modelde hata sonrası bekleme. Kota yoktur, sunucu çoğunlukla hemen düzelir (zaman aşımı, bozuk JSON, an
+    /// meşgul): tek bir hata bir dakika boyunca bütün satırları yerel çeviriye düşürmesin, yalnız birkaç satırı etkilesin.
+    /// Askıda kalan sunucuda da bekleme sürer: her satır `localTimeout` kadar beklemez, sıra dolmaz.
+    public static let localRetryAfter: TimeInterval = 5
     /// Dakikalık sınır aşılınca en çok bu kadar beklenir (hizmet bekleme önermezse de bu kadar).
     public static let rateLimitPause: TimeInterval = 20
 
+    /// Hata sonrası hizmetin denenmediği süre: yerel modelde `localRetryAfter`, bulutta `retryAfter` (testler kısaltır).
+    var errorPause: TimeInterval
     public let provider: AIProvider
     public let model: AIModel
     /// Yerel modelin sunucusu; bulut hizmetlerinde nil.
@@ -611,6 +627,7 @@ public final class AITranslationCore: @unchecked Sendable {
                 cache: TranslationCache = TranslationCache(), budget: RequestBudget? = nil, game: (@Sendable () -> String?)? = nil,
                 instruction: String? = nil) {
         self.provider = provider
+        errorPause = provider.isLocal ? Self.localRetryAfter : Self.retryAfter
         self.game = game
         self.instruction = AIRequest.instruction(instruction)
         instructionTag = AIRequest.instructionTag(instruction)
@@ -701,7 +718,7 @@ public final class AITranslationCore: @unchecked Sendable {
         } catch {
             setFailure(error as? AIFailure ?? .unreachable)
             lock.withLock {
-                pausedUntil = Date().addingTimeInterval(Self.retryAfter)
+                pausedUntil = Date().addingTimeInterval(errorPause)
                 pauseRateLimited = false
             }
             return remember(try await fallback(text), for: text, game: game)
@@ -709,10 +726,17 @@ public final class AITranslationCore: @unchecked Sendable {
         var local = false
         for (index, sentence) in zip(missing, translated) {
             let piece = pieces[index].text
-            if Self.isEcho(piece, sentence), let retried = try await Self.tryFallback(piece, fallback: fallback),
-               !Self.isEcho(piece, retried) {
+            // Model dizide bu cümleyi boş bıraktıysa (bozuk OCR okumasında olabiliyor, #296) yanıt yok sayılır.
+            let empty = sentence.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            if empty || Self.isEcho(piece, sentence), let retried = try await Self.tryFallback(piece, fallback: fallback),
+               !retried.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !Self.isEcho(piece, retried) {
                 // Yerel çeviri bu motorun önbelleğine yazılmaz.
                 translations[index] = retried
+                local = true
+                continue
+            }
+            if empty {
+                // Yerel çeviri de yoksa cümle olduğu gibi kalır; boş satır gösterilmez, sonuç önbelleğe yazılmaz.
                 local = true
                 continue
             }
@@ -791,7 +815,7 @@ public final class AITranslationCore: @unchecked Sendable {
             } catch {
                 setFailure(error as? AIFailure ?? .unreachable)
                 lock.withLock {
-                    pausedUntil = Date().addingTimeInterval(Self.retryAfter)
+                    pausedUntil = Date().addingTimeInterval(errorPause)
                     pauseRateLimited = false
                 }
                 failed = true
@@ -885,6 +909,9 @@ public final class AITranslationCore: @unchecked Sendable {
             throw CancellationError()
         } catch is CancellationError {
             throw CancellationError()
+        } catch let error as URLError where error.code == .timedOut {
+            // Hizmete ulaşıldı ama yanıt zamanında gelmedi: internet hatası değildir.
+            throw AIFailure.busy
         } catch {
             // URLError adresi taşır ama anahtarı taşımaz; yine de dışarı yalnız durum çıkar.
             throw AIFailure.unreachable
@@ -909,8 +936,8 @@ public final class AITranslationCore: @unchecked Sendable {
                                            budget: RequestBudget(perMinute: .max))
         do {
             let result = try await translator.translate(sample) { _ in
-                // Dakikalık sınıra takıldıysa anahtar geçerlidir ama şu an sınırdadır.
-                throw translator.lastFailure ?? (translator.lastLineWasRateLimited ? AIFailure.quotaExceeded : AIFailure.unreachable)
+                // Dakikalık sınıra takıldıysa anahtar geçerlidir, hizmet şu an yoğundur (bakiye bitmedi).
+                throw translator.lastFailure ?? (translator.lastLineWasRateLimited ? AIFailure.busy : AIFailure.unreachable)
             }
             return .success(result)
         } catch {

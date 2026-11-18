@@ -443,7 +443,8 @@ final class AppModel: ObservableObject {
             let windowAppChanged = settings.frameSource == .remotePlayWindow && settings.remotePlayApp != oldValue.remotePlayApp
             if settings.frameSource != oldValue.frameSource || windowAppChanged, isRunning {
                 // Görüntü kaynağı (ya da okunan Remote Play uygulaması) değişti: çeviri yeni kaynakla yeniden başlar.
-                stop()
+                // TV uygulaması kapatılmaz; kapanıp yeniden açılsa TV girişi gidip gelirdi.
+                stop(closingTVApp: false)
                 Task { await start() }
             }
             if settings.sharePool != oldValue.sharePool {
@@ -501,6 +502,14 @@ final class AppModel: ObservableObject {
     }
     @Published var showAbout = false
     @Published var showSettings = false
+    /// Ayarlar açılınca gösterilen bölüm (ana ekrandaki "Çeviri" satırı Çeviri'yi açar); sayfa kapanınca başa döner.
+    @Published var settingsSection: SettingsSection = .appearance
+
+    /// Ayarları verilen bölümle açar.
+    func openSettings(_ section: SettingsSection) {
+        settingsSection = section
+        showSettings = true
+    }
 
     private let services: AppServices
     private let store: AppStore
@@ -531,6 +540,9 @@ final class AppModel: ObservableObject {
     private let pool: LinePool
     /// Oynanan oyun: PS5'in bildirdiği, kullanıcının seçtiği ya da paketten tanınan (havuza giden satırlar bu oyunla gider).
     let gameChoice: GameChoice
+    /// Oyuna göre alanlar: oyun değişince kayıtlı alanları uygular ya da önerir (bkz. CouchSubsCore GameAreas).
+    lazy var gameAreas = GameAreas(read: { [weak self] in self?.settings ?? UserSettings() },
+                                   write: { [weak self] in self?.settings = $0 })
     private var poolTimer: Task<Void, Never>?
     private var terminateObserver: NSObjectProtocol?
     /// Bağlıyken birkaç dakikada bir PS5'e çalışan oyunu sorar (havuza giden satırlar oyunla gider). Testlerde kapalı.
@@ -590,7 +602,8 @@ final class AppModel: ObservableObject {
         self.accountId = accountId
         self.console = console
         self.tv = tv
-        let curated = loaded.withCuratedModels()
+        // Uygulama oturum sürerken kapandıysa oyunun profili açık kalmış olabilir: genel alanlar geri gelir.
+        let curated = GameAreas.restored(loaded.withCuratedModels())
         settings = curated
         streamBackground = StreamBackground(stored: defaults.string(forKey: StoreKey.streamBackground))
         // Pencereler açılmadan önce: açılışta açık temanın bir an görünmesi olmaz.
@@ -630,6 +643,7 @@ final class AppModel: ObservableObject {
             // Bu oyunun (havuzdan otomatik) paketi sunucuda yeni çıkmış olabilir.
             if game != nil { self?.packsForGame() }
         }
+        gameChoice.onPublish = { [weak self] game, source in self?.gameAreas.follow(game: game, source: source) }
         gameChoice.packTitles = { [weak self] in GameCatalog.packGames(self?.installedPacks ?? []) }
         // Elle seçilen oyunda satırlar yalnız o oyunun paketinde aranır, paketi yoksa hiç aranmaz (#218).
         gameChoice.packs = packs
@@ -746,7 +760,18 @@ final class AppModel: ObservableObject {
             }
         }
         terminateObserver = NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil,
-                                                                   queue: nil) { _ in
+                                                                   queue: nil) { [weak self] _ in
+            // Çeviri sürüyorsa TV uygulaması kapanır; mesaj sunucu kapanmadan yazılsın diye en çok bir saniye beklenir.
+            if Thread.isMainThread {
+                MainActor.assumeIsolated {
+                    guard let self, self.keeper != nil else { return }
+                    self.keeper?.stop()
+                    self.keeper = nil
+                    let exited = DispatchSemaphore(value: 0)
+                    self.server.exitTVApp { exited.signal() }
+                    _ = exited.wait(timeout: .now() + 1)
+                }
+            }
             // Kapanış en çok birkaç saniye bekler.
             let done = DispatchSemaphore(value: 0)
             Task.detached {
@@ -1239,6 +1264,7 @@ final class AppModel: ObservableObject {
         self.session = session
 
         startKeeper()
+        gameAreas.start()
         // Remote Play penceresinden okurken PS5 eşleşmesi olmayabilir; son oyun o zaman PS5 adı olmadan hatırlanır.
         gameChoice.start(console: console.map { $0.name.isEmpty ? $0.host : $0.name }) { [weak self] in
             guard let self else { return false }
@@ -1311,9 +1337,11 @@ final class AppModel: ObservableObject {
         keepAwake()
         if settings.output.showsOnTV {
             startKeeper()
-        } else {
-            keeper?.stop()
-            keeper = nil
+        } else if let keeper {
+            // Altyazı artık TV'ye gitmiyor: TV uygulaması kapanır, TV kendi girişine döner (#268).
+            keeper.stop()
+            self.keeper = nil
+            server.exitTVApp()
         }
     }
 
@@ -1553,7 +1581,7 @@ final class AppModel: ObservableObject {
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
         let result = await services.testAIKey(provider: provider, key: key, model: settings.model(for: provider))
         switch result {
-        case .success, .failure(.quotaExceeded), .failure(.modelRejected): saveKey(key, for: TranslationEngine(provider))
+        case .success, .failure(.quotaExceeded), .failure(.modelRejected), .failure(.busy): saveKey(key, for: TranslationEngine(provider))
         case .failure: break
         }
         return result
@@ -1577,7 +1605,7 @@ final class AppModel: ObservableObject {
         let result = await services.testLocalAI(server: server, key: key)
         if !typed.isEmpty {
             switch result {
-            case .success, .failure(.quotaExceeded), .failure(.modelRejected): saveKey(typed, for: .local)
+            case .success, .failure(.quotaExceeded), .failure(.modelRejected), .failure(.busy): saveKey(typed, for: .local)
             case .failure: break
             }
         }
@@ -1629,13 +1657,19 @@ final class AppModel: ObservableObject {
         hasLoginPasscode = false
     }
 
-    func stop() {
+    /// Çeviriyi durdurur. `closingTVApp`: kullanıcı durdurdu, TV uygulaması da kapanır (#268); ayar değişikliği gibi
+    /// iç yeniden başlatmalarda `false` verilir, TV açık kalır ve ardından gelen `start()` aynı bağlantıyı kullanır.
+    func stop(closingTVApp: Bool = true) {
         session?.stop()
         session = nil
         updateGameProbe(connected: false)
         gameChoice.stop()
-        keeper?.stop()
-        keeper = nil
+        gameAreas.stop()
+        if let keeper {
+            keeper.stop()
+            self.keeper = nil
+            if closingTVApp { server.exitTVApp() }
+        }
         pipeline?.reset()
         if pipeline != nil { SubtitleLog.write("oturum bitti") }
         pipeline = nil

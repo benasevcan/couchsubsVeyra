@@ -229,6 +229,26 @@ final class SubtitleServerTests: XCTestCase {
         XCTAssertFalse(tvLines.contains("event: subtitle"))
     }
 
+    /// #268: çıkış olayı TV'ye gider, OBS katmanına gitmez; tamamlanınca bildirilir.
+    func testExitTVAppReachesTVsOnly() async throws {
+        let server = SubtitleServer(port: 0)
+        let port = try await server.start()
+        defer { server.stop() }
+        let (tv, _) = try await URLSession.shared.bytes(from: URL(string: "http://127.0.0.1:\(port)/events")!)
+        let (obs, _) = try await URLSession.shared.bytes(from: URL(string: "http://127.0.0.1:\(port)/events?viewer=obs")!)
+        try await waitUntil { server.connectedClients == 1 }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let sent = expectation(description: "çıkış yazıldı")
+        server.exitTVApp { sent.fulfill() }
+        await fulfillment(of: [sent], timeout: 3)
+        server.stopSpeech()
+
+        let tvLines = try await readLines(tv, until: "event: speech-stop")
+        XCTAssertTrue(tvLines.contains("event: exit"))
+        let obsLines = try await readLines(obs, until: "event: speech-stop")
+        XCTAssertFalse(obsLines.contains("event: exit"))
+    }
+
     /// Bilgisayar ekranındaki pencere sunucudan geçen altyazıyı alır; sunucu başlamamış olsa da.
     func testLocalListenerGetsSubtitleAndClear() {
         let server = SubtitleServer(port: 0)

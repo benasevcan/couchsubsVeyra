@@ -92,25 +92,31 @@ struct HomeScreen: View {
                     if model.isXbox {
                         StatTile(symbol: "gamecontroller.fill", tint: .ok, label: "Xbox · Beta",
                                  value: model.xboxConsole.map { $0.name.isEmpty ? "Xbox" : $0.name } ?? String(localized: "Choose your Xbox"),
-                                 live: model.xboxConsole != nil && model.xboxSignedIn)
+                                 live: model.xboxConsole != nil && model.xboxSignedIn, chevron: true)
                     } else {
                         StatTile(symbol: "gamecontroller.fill", tint: .ok, label: "PS5",
                                  value: model.console.map { $0.name.isEmpty ? "PS5" : $0.name } ?? String(localized: "Pair the PS5"),
-                                 live: model.console != nil)
+                                 live: model.console != nil, chevron: true)
                     }
                 }
                 .buttonStyle(.plain)
                 Button { path.append(.target) } label: {
                     StatTile(symbol: model.settings.output == .computer ? "iphone" : "tv", tint: .accent, label: "Subtitles",
-                             value: targetName)
+                             value: targetName, chevron: true)
                 }
                 .buttonStyle(.plain)
                 .tourTarget(.target)
                 packsTile
                     .bentoWide()
                     .tourTarget(.packs)
-                StatTile(symbol: "globe", label: "Translation", value: engineName)
-                StatTile(symbol: "clock.arrow.circlepath", label: "Last session", value: lastSession)
+                // Çeviri motoru ve son oturum durum değil bilgi: iki satırlı tek bilgi karosu (TASARIM.md › Telefon ana ekranı).
+                Tile(spacing: 0) {
+                    Button { path.append(.settings) } label: { MobileInfoRow(title: "Translation", value: engineName) }
+                    RowDivider()
+                    Button { path.append(.history) } label: { MobileInfoRow(title: "Last session", value: lastSession) }
+                }
+                .buttonStyle(.plain)
+                .bentoWide()
             }
             if let update = model.tvAppUpdate {
                 TVAppUpdateTile(update: update) { path.append(.tvUpdate) }
@@ -145,21 +151,23 @@ struct HomeScreen: View {
         }
     }
 
-    /// Oyun paketleri karosu (yalnız paket simgesi mor); herkese ücretsiz.
+    /// Oyun paketleri karosu (yalnız paket simgesi mor): başlık ve not tek satır, sağda `›`; paketler kapalıysa nötr
+    /// "Kapalı" etiketi.
     private var packsTile: some View {
         Button { path.append(.packs) } label: {
             Tile {
                 HStack(spacing: Mobile.Space.gap) {
                     MobileTileIcon(symbol: "shippingbox", tint: .pro)
                     VStack(alignment: .leading, spacing: Mobile.Space.hair) {
-                        Text("Instant subtitles with ready packs").font(Mobile.TypeScale.headline)
+                        Text("Instant subtitles with ready packs").font(Mobile.TypeScale.headline).lineLimit(1)
                         Text(model.installedPacks.isEmpty ? String(localized: "GTA V, RDR2, Mafia and 3 more games")
                              : PacksScreen.summary(model.installedPacks))
                             .font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
+                            .lineLimit(1)
                     }
-                    Spacer()
-                    MobilePill(text: String(localized: "Free"))
-                    Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(Mobile.Palette.tertiary)
+                    Spacer(minLength: 0)
+                    if !model.settings.gamePacks { MobilePill(text: String(localized: "Off")) }
+                    RowChevron()
                 }
             }
         }
@@ -185,6 +193,7 @@ struct HomeScreen: View {
 
 struct RunningScreen: View {
     @EnvironmentObject private var model: PhoneModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding var path: [Route]
     @State private var showSubtitles = false
 
@@ -207,7 +216,7 @@ struct RunningScreen: View {
                 MobileNote(text: String(localized: "When you turn on the controller to play, choose your MAIN account on the PS5. Don't play with the second account CouchSubs signs in with, or the controller won't work in the game."),
                            tone: Mobile.Palette.secondary)
             }
-            GameSection(choice: model.gameChoice)
+            GameSection(choice: model.gameChoice, areas: model.gameAreas)
             Tile {
                 Text("Now").font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
                 if let current = model.recentLines.first {
@@ -215,7 +224,8 @@ struct RunningScreen: View {
                         .font(Mobile.TypeScale.subtitle(landscape: false, scale: scale))
                         .foregroundStyle(Mobile.Palette.accent)
                         .fixedSize(horizontal: false, vertical: true)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        // Azaltılmış harekette yalnız solarak gelir.
+                        .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.move(edge: .bottom).combined(with: .opacity))
                     HStack {
                         Text(verbatim: current.source).font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.tertiary)
                         Spacer()
@@ -242,9 +252,11 @@ struct RunningScreen: View {
                         if index > 0 { RowDivider() }
                         HStack(alignment: .top, spacing: Mobile.Space.gap) {
                             VStack(alignment: .leading, spacing: Mobile.Space.hair) {
+                                // Önceki çeviri 17 pt normal ve ikincil renkte, altında küçük özgün metin (Mac ile aynı;
+                                // TASARIM.md › Yazı): canlı satır tek vurgu olarak kalır.
                                 Text(verbatim: line.translation).font(Mobile.TypeScale.headline.weight(.regular))
                                     .foregroundStyle(Mobile.Palette.secondary)
-                                Text(verbatim: line.source).font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.tertiary)
+                                Text(verbatim: line.source).font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
                             }
                             Spacer()
                             // Kaynak işareti: düz yazı ("hazır" mor, motor adı üçüncül), hap değil.
@@ -264,22 +276,27 @@ struct RunningScreen: View {
                 Tile {
                     Text(model.settings.output.showsOnTV ? "TV" : "Screen").font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
                     Text(verbatim: model.settings.output.showsOnTV ? model.tvStatusText : String(localized: "This phone"))
-                        .font(Mobile.TypeScale.title).lineLimit(1).minimumScaleFactor(0.6)
+                        .font(Mobile.TypeScale.title).lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 }
             }
             Text("Keep CouchSubs open on the screen while you play. iOS stops the connection when the app goes to the background; the screen stays on while translating.")
                 .font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
         } bottom: {
-            if model.settings.output.showsOnComputer {
-                Button { showSubtitles = true } label: { Label("Subtitle screen", systemImage: "rectangle.landscape.rotate") }
-                    .buttonStyle(.mobileSecondary)
-            }
-            if model.settings.output.showsOnTV {
-                Button { model.sendTestSubtitle() } label: { Label("Test on TV", systemImage: "tv") }
-                    .buttonStyle(.mobileSecondary)
-            }
-            if model.sessionState == .streaming {
-                ScreenTranslateButton()
+            // İkincil eylemler tek satırda küçük düğmeler; "Çeviriyi durdur" altta tam genişlikte.
+            if model.settings.output.showsOnComputer || model.settings.output.showsOnTV || model.sessionState == .streaming {
+                HStack(spacing: Mobile.Space.gap) {
+                    if model.settings.output.showsOnComputer {
+                        Button { showSubtitles = true } label: { Label("Subtitle screen", systemImage: "rectangle.landscape.rotate") }
+                            .buttonStyle(MobileButtonStyle(kind: .secondary, compact: true))
+                    }
+                    if model.settings.output.showsOnTV {
+                        Button { model.sendTestSubtitle() } label: { Label("Test on TV", systemImage: "tv") }
+                            .buttonStyle(MobileButtonStyle(kind: .secondary, compact: true))
+                    }
+                    if model.sessionState == .streaming {
+                        ScreenTranslateButton()
+                    }
+                }
             }
             Button {
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -321,8 +338,8 @@ struct SubtitleScreen: View {
                     let wrapped = line.wrapped
                     Text(verbatim: wrapped.text)
                         .font(Mobile.TypeScale.subtitle(landscape: true, scale: scale * CGFloat(wrapped.scale)))
-                        // Önceki satır soldurulmaz, sabit gri olur (#7C7A76).
-                        .foregroundStyle(index < model.phoneLines.count - 1 ? Color(hex: 0x7C7A76) : textColor)
+                        // Önceki satır soldurulmaz, ikincil yazı renginde olur (TASARIM.md › Yazı).
+                        .foregroundStyle(index < model.phoneLines.count - 1 ? Mobile.Palette.secondary : textColor)
                         .opacity(line.fading ? 0.4 : 1)
                         .multilineTextAlignment(.center)
                         .minimumScaleFactor(0.5)
@@ -399,6 +416,10 @@ struct SubtitleScreen: View {
 
     private var statusText: String {
         guard model.sessionState == .streaming else { return model.ps5StatusText }
+        // Xbox'ta "PS5 bağlı" yazmasın: bağlı konsolun türü söylenir.
+        if model.isXbox {
+            return model.packsActive ? String(localized: "Xbox connected · ready translation") : String(localized: "Xbox connected")
+        }
         return model.packsActive ? String(localized: "PS5 connected · ready translation") : String(localized: "PS5 connected")
     }
 
@@ -519,6 +540,7 @@ extension View {
 }
 
 /// "Ekranı çevir": oyun ekranının tamamını çevirir; çeviri sürerken ya da sonuçlar ekrandayken dokununca kaldırır.
+/// Çeviri sürüyor ekranının alt satırında küçük düğme.
 struct ScreenTranslateButton: View {
     @EnvironmentObject private var model: PhoneModel
 
@@ -533,6 +555,6 @@ struct ScreenTranslateButton: View {
             case .shown: Label("Remove screen translations", systemImage: "xmark.circle")
             }
         }
-        .buttonStyle(.mobileSecondary)
+        .buttonStyle(MobileButtonStyle(kind: .secondary, compact: true))
     }
 }

@@ -93,7 +93,8 @@ private struct SettingsSidebar: View {
     }
 }
 
-/// Kenar çubuğundaki bir satır (ayarlar bölümü ya da kurulum adımı).
+/// Kenar çubuğundaki bir satır (ayarlar bölümü ya da kurulum adımı): seçiliyken yüzey-2 zemin ve yarı kalın yazı,
+/// üzerine gelince de yüzey-2 zemin.
 struct SidebarRow: View {
     let title: LocalizedStringKey
     let symbol: String
@@ -112,11 +113,10 @@ struct SidebarRow: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, Theme.space("m"))
-            .frame(minHeight: 40)
+            .frame(minHeight: Theme.size("rowHeight"))
             .background(selected ? Color.csSurface2 : Color.clear, in: RoundedRectangle(cornerRadius: Theme.radius("control"), style: .continuous))
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RowButtonStyle(radius: "control"))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
@@ -158,16 +158,23 @@ private struct AppearanceCard: View {
 
     var body: some View {
         Card(title: model.settings.output == .tv ? "On the TV" : "Subtitle appearance") {
-            // 1920 piksellik TV ekranında yazı yüksekliği; sürüklerken TV'de örnek altyazı görünür.
-            Slider(value: Binding(get: { Double(model.settings.style.fontSize) },
-                                  set: { model.settings.style.fontSize = Int($0.rounded()) }), in: 20...80) {
-                Text("Text size")
-            } minimumValueLabel: {
-                Text("Small").font(.csCallout).foregroundStyle(Color.csSecondary)
-            } maximumValueLabel: {
-                Text("Large").font(.csCallout).foregroundStyle(Color.csSecondary)
-            } onEditingChanged: { editing in
-                if editing { model.sendTestSubtitle() }
+            // 1920 piksellik TV ekranında yazı yüksekliği; sürüklerken TV'de örnek altyazı görünür. Sağda değer (piksel),
+            // sabit genişlikte rakamlarla: sürüklerken kaydırıcı oynamaz.
+            HStack(spacing: Theme.space("m")) {
+                Slider(value: Binding(get: { Double(model.settings.style.fontSize) },
+                                      set: { model.settings.style.fontSize = Int($0.rounded()) }), in: 20...80) {
+                    Text("Text size")
+                } minimumValueLabel: {
+                    Text("Small").font(.csCallout).foregroundStyle(Color.csSecondary)
+                } maximumValueLabel: {
+                    Text("Large").font(.csCallout).foregroundStyle(Color.csSecondary)
+                } onEditingChanged: { editing in
+                    if editing { model.sendTestSubtitle() }
+                }
+                Text(verbatim: "\(model.settings.style.fontSize)")
+                    .font(.csCallout.monospacedDigit())
+                    .foregroundStyle(Color.csSecondary)
+                    .accessibilityHidden(true)
             }
             // Yer ayarları TV içindir; bilgisayar ekranındaki altyazı penceresi sürüklenerek taşınır (Genzo, 2026-11-13:
             // "ekrandaki konum ayarı işlemiyor").
@@ -214,8 +221,8 @@ private struct AppearanceCard: View {
                 Text("Full-width band").tag(SubtitleBackgroundShape.band)
             }
             HintText(text: "Drag Background all the way to Solid to fully hide the English subtitle in the game. A full-width band also covers the sides.")
-            Toggle("Bold text", isOn: $model.settings.style.bold)
-            Toggle("Keep previous lines above in fast dialogue", isOn: $model.settings.style.stackPrevious)
+            SwitchRow(title: "Bold text", isOn: $model.settings.style.bold)
+            SwitchRow(title: "Keep previous lines above in fast dialogue", isOn: $model.settings.style.stackPrevious)
             HintText(text: "When off, each new line replaces the previous one. Needs TV app 0.9.16 or later.")
             Picker("Text color", selection: $model.settings.style.textColor) {
                 Text("White").tag(SubtitleTextColor.white)
@@ -251,7 +258,7 @@ private struct LiveRegionPreview: View {
     @ObservedObject var preview: FramePreview
 
     var body: some View {
-        RegionPreview(region: settings.region, frame: preview.image) { settings.setCustomRegion($0) }
+        RegionPreview(region: settings.region, frame: preview.image, centered: settings.keepAreaCentered) { settings.setCustomRegion($0) }
     }
 }
 
@@ -260,6 +267,7 @@ private struct AreaCards: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
+        AreaProfileCard(areas: model.gameAreas)
         Card {
             Picker("Area preset", selection: Binding(get: { model.settings.areaPreset }, set: { model.settings.selectAreaPreset($0) })) {
                 ForEach(AreaPreset.allCases, id: \.self) { preset in Text(preset.title).tag(preset) }
@@ -268,12 +276,65 @@ private struct AreaCards: View {
             .labelsHidden()
             LiveRegionPreview(settings: $model.settings, preview: model.framePreview)
             if model.settings.areaPreset == .custom { CustomAreaSliders(settings: $model.settings) }
+            SwitchRow(title: "Keep centered", isOn: $model.settings.keepAreaCentered)
             HintText(text: "Adjust the frame so it covers where the game shows its subtitles.")
-            HintText(text: "Drag the frame to move it, or drag its corner to resize it.")
+            // "Ortalı kalır" yalnız Ortada tut açıkken yazılır.
+            if model.settings.keepAreaCentered {
+                HintText(text: "Drag the frame to move it, or drag an edge or corner to resize it; the subtitle area stays centered.")
+            } else {
+                HintText(text: "Drag the frame to move it, or drag an edge or corner to resize it.")
+            }
         }
         ExtraAreasCard()
         Card(title: "Translate the screen (⌥⌘T)") {
             HintText(text: "Press ⌥⌘T while playing: every text on the screen is translated once and shown on the TV in its own place. Press again to remove the translations.")
+        }
+    }
+}
+
+/// "Bu oyunun alanları": alanlar oynanan oyuna kaydedilir, o oyun yeniden oynanınca kendiliğinden gelir. Profil etkinse
+/// hangi oyunun alanları olduğu ve kaydedilmemiş değişiklikte "Profile kaydet" (Windows, iPhone ve Android ile aynı).
+private struct AreaProfileCard: View {
+    @ObservedObject var areas: GameAreas
+    /// Alanlar değişince (kaydedilmemiş değişiklik) kart yenilenir.
+    @EnvironmentObject private var model: AppModel
+    @State private var confirmDelete = false
+
+    var body: some View {
+        let active = model.settings.activeAreaProfile == nil ? nil : areas.activeGame
+        let target = areas.target
+        let unsaved = model.settings.areasDifferFromProfile
+        Card(title: "Areas for this game") {
+            if let active {
+                Text(verbatim: String(format: String(localized: "These areas are saved for %@."), active)).font(.csBody)
+                HintText(text: unsaved ? "Your changes are not saved yet; they are dropped when translating stops."
+                                       : "They come back by themselves whenever you play this game.")
+            } else if let target {
+                Text("These are your general areas.").font(.csBody)
+                Text(verbatim: String(format: String(localized: "Save them for %@ and they come back by themselves the next time you play it."), target))
+                    .font(.csCallout)
+                    .foregroundStyle(Color.csSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Areas can be saved for a game while translating, once the game being played is known.").font(.csBody)
+                HintText(text: "The played game is shown on the home screen; you can choose it there.")
+            }
+            if target != nil || active != nil {
+                HStack(spacing: Theme.space("s")) {
+                    if let target, active == nil || unsaved {
+                        Button(active == nil ? String(format: String(localized: "Save for %@"), target) : String(localized: "Save to profile")) {
+                            areas.save()
+                        }
+                        .buttonStyle(.secondary)
+                    }
+                    if active != nil {
+                        Button("Delete profile") { confirmDelete = true }.buttonStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .confirmationDialog(String(format: String(localized: "Delete the saved areas for %@?"), active ?? ""), isPresented: $confirmDelete) {
+            Button("Delete profile", role: .destructive) { areas.delete() }
         }
     }
 }
@@ -314,6 +375,8 @@ private struct ExtraAreaEditor: View {
                         .textFieldStyle(CSTextFieldStyle())
                     Toggle("Read this area", isOn: Binding(get: { area.enabled },
                                                            set: { on in settings.updateExtraArea(id: id) { $0.enabled = on } }))
+                        .toggleStyle(.switch)
+                        .tint(Color.csAccent)
                         .fixedSize()
                     Button("Remove") { settings.removeExtraArea(id: id) }.buttonStyle(.secondary)
                 }
@@ -381,6 +444,7 @@ private struct OBSCard: View {
                     obsCopied = true
                 }
                 .buttonStyle(.secondary)
+                .resetsAfterDelay($obsCopied)
             }
             HintText(text: "If OBS runs on another computer, use this Mac's network address instead of localhost. The overlay only shows subtitles while the translation is running.")
             if let networkAddress {
@@ -416,6 +480,7 @@ private struct AddressRow: View {
                 copied = true
             }
             .buttonStyle(.secondary)
+            .resetsAfterDelay($copied)
         }
     }
 }
@@ -598,7 +663,7 @@ private struct GamePacksPage: View {
             Text("Game packs").font(.csDisplay)
             Spacer()
             if !model.installedPacks.isEmpty {
-                Pill(text: String(format: String(localized: "Free · %lld games"), model.installedPacks.count), tone: .success)
+                Pill(text: String(format: String(localized: "Free · %lld games"), model.installedPacks.count))
             }
         }
         Text("Ready-made Turkish translations for some games. A line found in a pack appears at once, without the translation engine.")
@@ -803,14 +868,14 @@ private struct PackTile: View {
     }
 }
 
-/// Başlık solda, anahtar sağda.
-private struct SwitchRow: View {
+/// Açık/kapalı ayar: başlık (`body`) solda, anahtar sağda. Onay kutusu kullanılmaz.
+struct SwitchRow: View {
     let title: LocalizedStringKey
     @Binding var isOn: Bool
 
     var body: some View {
         HStack(spacing: Theme.space("m")) {
-            Text(title).font(.csHeadline).fixedSize(horizontal: false, vertical: true)
+            Text(title).font(.csBody).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: Theme.space("m"))
             Toggle(title, isOn: $isOn)
                 .labelsHidden()
@@ -900,6 +965,7 @@ struct TranslationCard: View {
         case .quotaExceeded: String(format: String(localized: "Your %@ account has no credit left or has reached its limit."), name)
         case .modelRejected: String(format: String(localized: "%@ did not accept the request. Choose the other model or try again later."), name)
         case .unreachable: String(format: String(localized: "%@ could not be reached. Check your internet connection."), name)
+        case .busy: String(format: String(localized: "%@ is busy or did not answer in time. Try again in a moment, or choose the faster model."), name)
         }
     }
 
@@ -918,7 +984,7 @@ struct TranslationCard: View {
                 return String(format: String(localized: "LM Studio does not have the model %@. Download and load it in LM Studio, or check the model name."), server.model)
             }
             return String(format: String(localized: "The model %1$@ is not on the local server. Download it: ollama pull %1$@"), server.model)
-        case .unreachable:
+        case .unreachable, .busy:
             switch server.kind {
             case .ollama:
                 return String(format: String(localized: "Ollama is not running: %1$@ could not be reached, or the model did not answer in time. Open Ollama and download the model: ollama pull %2$@"), server.address, server.model)
@@ -949,6 +1015,7 @@ private struct EngineTile: View {
     let option: TranslationEngine
     let selected: Bool
     let action: () -> Void
+    @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
@@ -958,10 +1025,12 @@ private struct EngineTile: View {
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, minHeight: 64, alignment: .topLeading)
-            .tile(selected ? .active : .plain, padding: Theme.space("m"))
-            .contentShape(Rectangle())
+            // Seçili olmayan karo üzerine gelince yüzey-2 zemin alır.
+            .tile(selected ? .active : .plain, padding: Theme.space("m"), fill: hovering && !selected ? Color.csSurface2 : Color.csSurface)
         }
-        .buttonStyle(.plain)
+        // Zemini karo değiştirir; düğme biçemi yalnız klavye odağının çerçevesini çizer.
+        .buttonStyle(RowButtonStyle(radius: "card", hoverFill: nil))
+        .onHover { hovering = $0 }
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
@@ -1032,7 +1101,7 @@ private struct DeepLKeySection: View {
             String(localized: "This month's DeepL limit is used up. Until it renews, the translation model on this computer translates.")
         case .invalid:
             String(localized: "DeepL did not accept this key. Copy it again from your DeepL account page.")
-        case .unreachable, .modelRejected:
+        case .unreachable, .modelRejected, .busy:
             String(localized: "DeepL could not be reached. Check your internet connection.")
         }
     }

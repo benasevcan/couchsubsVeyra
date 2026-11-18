@@ -96,6 +96,10 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     private string? playedGame;
     private bool askingGame;
     private CancellationTokenSource? gameAsk;
+    /// <summary>Bu oturumda geri alınan ya da istenmeyen alan profilleri (oturum boyunca yeniden uygulanmaz).</summary>
+    private readonly HashSet<string> declinedAreaProfiles = [];
+    /// <summary>Paketten tanınan oyunun önerilen profili ("Kayıtlı alanlar kullanılsın mı?"); yoksa null.</summary>
+    private string? offeredAreaProfile;
     private Timer? packTimer;
     private string metricsText = "";
     /// <summary>Çevrilen satırların geçmişi (arayüz iş parçacığında değişir).</summary>
@@ -120,12 +124,19 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         consoleKindLocked = store.Load<bool?>(StoreKeys.ConsoleKindLocked) ?? false;
         xboxToken = store.Load<string>(StoreKeys.XboxToken);
         xboxConsole = store.Load<XboxConsole>(StoreKeys.XboxConsole);
-        tv = store.Load<LgTv>(StoreKeys.Tv);
+        if (xboxConsole is { } savedXbox && RepairMisreadName(savedXbox.Name) is { } repairedName)
+        {
+            xboxConsole = savedXbox with { Name = repairedName };
+            store.Save(StoreKeys.XboxConsole, xboxConsole);
+        }
+        tv =store.Load<LgTv>(StoreKeys.Tv);
         var loaded = settingsStore.Load();
         settings = loaded.WithCuratedModels() with
         {
             CpuTranslationThreads = CpuThreadOptions.Normalize(loaded.CpuTranslationThreads, Environment.ProcessorCount),
         };
+        // Uygulama oturum sürerken kapandıysa oyunun profili açık kalmış olabilir: açılışta genel alanlar geri gelir.
+        if (settings.ActiveAreaProfile is not null || settings.GeneralAreas is not null) settings = settings.WithGeneralAreas();
         services.Translation.SelectCpuThreads(settings.CpuTranslationThreads);
         services.Translation.SelectDevice(settings.TranslationDevice);
         // Listede olmayan model varsayılana döndüyse ayar hemen kaydedilir.
@@ -248,6 +259,31 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     }
 
     /// <summary>
+    /// beta.45'ten önceki sürümler köprünün UTF-8 çıktısını Windows'un ANSI kod sayfasıyla (Türkçe Windows'ta 1254) okudu,
+    /// "Oturma Odası" "Oturma OdasÄ±" diye kaydedildi (#223, #268). Ad listeden tazelenene kadar ana ekranda bozuk kalıyordu.
+    /// Ad o kod sayfasına geri çevrilip geçerli UTF-8 olarak çözülüyorsa düzeltilmiş adı döner. Doğru adlar ("ı" tek başına
+    /// geçerli UTF-8 değildir) ve ASCII adlar dokunulmadan kalır (null).
+    /// </summary>
+    private static string? RepairMisreadName(string name)
+    {
+        if (name.All(char.IsAscii)) return null;
+        var strictUtf8 = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+        foreach (var codePage in new[] { 1254, 1252 })
+        {
+            try
+            {
+                var ansi = System.Text.CodePagesEncodingProvider.Instance.GetEncoding(codePage,
+                    System.Text.EncoderFallback.ExceptionFallback, System.Text.DecoderFallback.ExceptionFallback);
+                if (ansi is null) continue;
+                var repaired = strictUtf8.GetString(ansi.GetBytes(name));
+                if (repaired != name) return repaired;
+            }
+            catch (ArgumentException) { /* Ad bu kod sayfasıyla bozulmamış. */ }
+        }
+        return null;
+    }
+
+    /// <summary>
     /// Xbox görüntüsü ilk kez gelince liste arka planda bir kez sorulur; yalnız kayıtlı adı tazeler, hata yok sayılır.
     /// Görüntü gelene kadar beklenir: köprüye o sırada yayının yenilediği jeton yüklüdür, iki istek çakışmaz.
     /// </summary>
@@ -365,6 +401,9 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             if (old.CpuTranslationThreads != value.CpuTranslationThreads)
                 services.Translation.SelectCpuThreads(value.CpuTranslationThreads);
             UpdateRegionWatcher();
+            if (old.ActiveAreaProfile != value.ActiveAreaProfile || old.AreaProfiles != value.AreaProfiles || old.Areas != value.Areas
+                || old.FrameSource != value.FrameSource)
+                Changed(nameof(AreaProfileGame), nameof(AreaProfileUnsaved), nameof(AreaProfileTarget));
             if (old.FrameSource != value.FrameSource || old.CaptureWindow != value.CaptureWindow)
                 Changed(nameof(CanStart), nameof(Ps5StatusText), nameof(ConsoleTitle));
             var windowAppChanged = value.FrameSource == FrameSource.RemotePlayWindow && old.RemotePlayApp != value.RemotePlayApp;
@@ -374,7 +413,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             if (isRunning && (old.FrameSource != value.FrameSource || windowAppChanged || captureWindowChanged || xboxFrameRateChanged || xboxAudioChanged))
             {
                 // Görüntü kaynağı, Xbox kare aralığı ya da Xbox ses çıkışı değişti: akış yeni seçimle yeniden başlar.
-                Stop();
+                // TV uygulaması kapatılmaz; kapanıp yeniden açılsa TV girişi gidip gelirdi.
+                StopForRestart();
                 _ = StartAsync().ContinueWith(task => RemotePlayLog.Note($"Çeviri yeniden başlatılamadı: {task.Exception?.GetBaseException().Message}"),
                                               TaskContinuationOptions.OnlyOnFaulted);
             }
@@ -1365,8 +1405,11 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         if (ShowsOnTv) StartKeeper();
         else
         {
-            keeper?.Stop();
+            // Altyazı artık TV'ye gitmiyor: TV uygulaması kapanır, TV kendi girişine döner.
+            var stoppedKeeper = keeper;
             keeper = null;
+            stoppedKeeper?.Stop();
+            if (stoppedKeeper is not null) _ = server.ExitTvApp();
         }
     }
 
@@ -1431,15 +1474,28 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     /// <summary>Bilgisayarın ağ adresiyle OBS sayfası; localhost'u kabul etmeyen yayın programları (TikTok LIVE Studio) için.</summary>
     public string? NetworkObsAddress => LocalAddress(null) is { } address ? $"http://{address}:{ServerPort}/obs" : null;
 
-    public void Stop()
+    /// <summary>Kullanıcı çeviriyi durdurdu: oturum biter, TV uygulaması da kapanır (#268).</summary>
+    public void Stop() => _ = StopSession(closeTvApp: true);
+
+    /// <summary>
+    /// Ayar değişikliği gibi iç yeniden başlatmalarda kullanılır: oturum biter ama TV uygulaması açık kalır; hemen
+    /// ardından gelen <see cref="StartAsync"/> aynı TV bağlantısını kullanır.
+    /// </summary>
+    public void StopForRestart() => _ = StopSession(closeTvApp: false);
+
+    /// <summary>Oturumu bitirir; TV uygulamasına çıkış gönderildiyse mesajın yazılmasını bekleyen görevi döner.</summary>
+    private Task StopSession(bool closeTvApp)
     {
+        var stoppedKeeper = keeper;
+        keeper = null;
+        stoppedKeeper?.Stop();
+        var exiting = closeTvApp && stoppedKeeper is not null ? server.ExitTvApp() : Task.CompletedTask;
         session?.Stop();
         session?.Dispose();
         session = null;
         UpdateGameProbe(connected: false);
         StopGameSense();
-        keeper?.Stop();
-        keeper = null;
+        EndGameAreas();
         pipeline?.Reset();
         if (pipeline is not null) SubtitleLog.Write("oturum bitti");
         pipeline = null;
@@ -1463,6 +1519,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         ClearFirewallPrompt();
         OverlayHidden?.Invoke();
         StreamHidden?.Invoke();
+        return exiting;
     }
 
     /// <summary>Bilgisayar uykudan uyanınca bağlantıları hemen yenile.</summary>
@@ -1544,8 +1601,11 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         services.Translation.EngineFailure -= OnEngineFailure;
         services.Translation.GpuFallback -= OnGpuFallback;
         if (services.Xbox is { } xbox) xbox.TokenUpdated -= OnXboxTokenUpdated;
-        Stop();
+        var exiting = StopSession(closeTvApp: true);
         if (services.Xbox is IDisposable disposableXbox) disposableXbox.Dispose();
+        // Sunucu kapanmadan TV'ye çıkış mesajı yazılsın; TV yanıt vermiyorsa kapanış en çok bir saniye bekler.
+        try { exiting.Wait(TimeSpan.FromSeconds(1)); }
+        catch (AggregateException) { }
         server.Dispose();
         poolTimer?.Dispose();
         packTimer?.Dispose();
@@ -1615,6 +1675,105 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         AskingGame = false;
     }
 
+    // --- Oyuna göre alanlar (Ayarlar › Alan ve ana ekrandaki oyun kartı) ---
+
+    /// <summary>Uygulanan alan profilinin oyunu; genel alanlar kullanılıyorsa null.</summary>
+    public string? AreaProfileGame => settings.FindAreaProfile(settings.ActiveAreaProfile)?.Game;
+
+    /// <summary>Profil etkin ve alanlar profilden sonra değişti: "Profile kaydet" gösterilir (kaydedilmezse oturum bitince bırakılır).</summary>
+    public bool AreaProfileUnsaved => settings.AreasDifferFromProfile;
+
+    /// <summary>
+    /// Alanların kaydedilebileceği oyun: çeviri sürüyor ve oyun biliniyor. Profil etkinse o profilin oyunu; değilse
+    /// oynanan oyun ("Bu alanları X için kaydet").
+    /// </summary>
+    public string? AreaProfileTarget => session is null ? null : AreaProfileGame ?? PlayedGame;
+
+    /// <summary>Paketten tanınan oyunun kayıtlı alanları var; kullanıcıya sorulur. Kartta gösterilen oyun adı.</summary>
+    public string? OfferedAreaProfileGame => settings.FindAreaProfile(offeredAreaProfile)?.Game;
+
+    /// <summary>"Kullan": önerilen profil uygulanır.</summary>
+    public void UseOfferedAreaProfile()
+    {
+        if (settings.FindAreaProfile(offeredAreaProfile) is { } profile) ApplyAreaProfile(profile);
+        SetOfferedAreaProfile(null);
+    }
+
+    /// <summary>"Hayır": önerilen profil bu oturumda bir daha sorulmaz.</summary>
+    public void DeclineOfferedAreaProfile()
+    {
+        if (offeredAreaProfile is { } key) declinedAreaProfiles.Add(key);
+        SetOfferedAreaProfile(null);
+    }
+
+    /// <summary>"Geri al": genel alanlara dönülür; bu oyunun profili bu oturumda yeniden uygulanmaz.</summary>
+    public void UndoAreaProfile()
+    {
+        if (settings.ActiveAreaProfile is not { } key) return;
+        declinedAreaProfiles.Add(key);
+        Settings = settings.WithGeneralAreas();
+        SubtitleLog.Write("alan profili geri alındı: " + key);
+    }
+
+    /// <summary>Okunan alanlar etkin profile, profil yoksa oynanan oyuna kaydedilir.</summary>
+    public void SaveAreaProfile()
+    {
+        if (AreaProfileTarget is not { } game) return;
+        declinedAreaProfiles.RemoveWhere(key => key == AreaProfiles.Key(game, settings.AreaSource));
+        Settings = settings.WithSavedAreaProfile(game);
+        SubtitleLog.Write("alan profili kaydedildi: " + settings.ActiveAreaProfile);
+    }
+
+    /// <summary>Etkin profil silinir ve genel alanlara dönülür.</summary>
+    public void DeleteAreaProfile()
+    {
+        if (settings.ActiveAreaProfile is not { } key) return;
+        Settings = settings.WithoutAreaProfile(key);
+        SubtitleLog.Write("alan profili silindi: " + key);
+    }
+
+    private void ApplyAreaProfile(AreaProfile profile)
+    {
+        Settings = settings.WithAreaProfile(profile);
+        SubtitleLog.Write("alan profili uygulandı: " + profile.Key);
+    }
+
+    private void SetOfferedAreaProfile(string? key)
+    {
+        if (offeredAreaProfile == key) return;
+        offeredAreaProfile = key;
+        Changed(nameof(OfferedAreaProfileGame));
+    }
+
+    /// <summary>Oyun değişti (ya da çeviri başladı): o oyunun kayıtlı alanları uygulanır, önerilir ya da genel alanlara dönülür.</summary>
+    private void FollowGameAreas()
+    {
+        Changed(nameof(AreaProfileTarget));
+        if (session is null) return;
+        var decision = AreaProfiles.Decide(settings.ActiveAreaProfile, gameSense.Current?.Name, gameSense.Source, settings.AreaSource,
+                                           key => settings.FindAreaProfile(key) is not null, declinedAreaProfiles.Contains);
+        SetOfferedAreaProfile(decision.Step == AreaProfiles.Step.Offer ? decision.Key : null);
+        switch (decision.Step)
+        {
+            case AreaProfiles.Step.Apply when settings.FindAreaProfile(decision.Key) is { } profile:
+                ApplyAreaProfile(profile);
+                break;
+            case AreaProfiles.Step.UseGeneral:
+                Settings = settings.WithGeneralAreas();
+                SubtitleLog.Write("başka oyun: genel alanlara dönüldü");
+                break;
+        }
+    }
+
+    /// <summary>Oturum bitti: profil bırakılır (kaydedilmemiş alan değişiklikleri de), sorular sıfırlanır.</summary>
+    private void EndGameAreas()
+    {
+        declinedAreaProfiles.Clear();
+        SetOfferedAreaProfile(null);
+        if (settings.ActiveAreaProfile is not null || settings.GeneralAreas is not null) Settings = settings.WithGeneralAreas();
+        Changed(nameof(AreaProfileTarget));
+    }
+
     /// <summary>Oyun değiştiyse havuza bildirilir; yeni oyunun (havuzdan otomatik) paketi sunucuda yeni çıkmış olabilir.</summary>
     private void PublishGame()
     {
@@ -1622,6 +1781,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         services.GamePacks?.LimitToGame(gameSense.PackLimit);
         var current = gameSense.Current;
         PlayedGame = current?.Name;
+        FollowGameAreas();
         if (current == publishedGame) return;
         publishedGame = current;
         services.Pool?.SetGame(current);
@@ -1979,7 +2139,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     {
         key = key.Trim();
         var result = await services.TestAiKeyAsync(provider, key, provider.Model(settings.ModelFor(provider)).Id);
-        if (result.State is OnlineKeyState.Valid or OnlineKeyState.QuotaExceeded or OnlineKeyState.ModelRejected)
+        if (result.State is OnlineKeyState.Valid or OnlineKeyState.QuotaExceeded or OnlineKeyState.ModelRejected or OnlineKeyState.Busy)
             SaveKey(provider.Engine(), key);
         return result;
     }
@@ -2001,7 +2161,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         typed = typed.Trim();
         var key = typed.Length > 0 ? typed : store.Load<string>(StoreKeys.LocalAiKey) ?? "";
         var result = await services.TestLocalAiAsync(server, key);
-        if (typed.Length > 0 && result.State is OnlineKeyState.Valid or OnlineKeyState.QuotaExceeded or OnlineKeyState.ModelRejected)
+        if (typed.Length > 0 && result.State is OnlineKeyState.Valid or OnlineKeyState.QuotaExceeded or OnlineKeyState.ModelRejected or OnlineKeyState.Busy)
             SaveKey(TranslationEngine.Local, typed);
         return result;
     }
