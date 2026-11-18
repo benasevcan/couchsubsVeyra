@@ -27,13 +27,16 @@ public sealed class FreeAreaWindow : Window
     private readonly Canvas canvas;
     private readonly Rectangle selection;
     private readonly Border resultPanel;
+    private readonly TextBlock sourceText;
     private readonly TextBlock resultText;
+    private readonly Button copyButton;
+    private string lastTranslation = "";
     private Point start;
     private bool dragging;
     /// <summary>Her seçim yeni numara alır; eski seçimin geç gelen sonucu yenisini ezmez.</summary>
     private int version;
 
-    /// <summary>Pencereyi açar; zaten açıksa öne getirir. Çeviri sürmüyorsa (kare yoksa) hiçbir şey yapmaz.</summary>
+    /// <summary>Pencereyi açar; canlı kare yoksa masaüstünden anlık görüntü alır.</summary>
     public static void Open(AppController controller)
     {
         if (current is not null)
@@ -41,24 +44,80 @@ public sealed class FreeAreaWindow : Window
             current.Activate();
             return;
         }
-        if (controller.LastFrame is not { } frame) return;
-        current = new FreeAreaWindow(controller, frame);
+        var frame = controller.LastFrame ?? ScreenSnapshot.CaptureMonitor(Application.Current?.MainWindow)?.Frame;
+        if (frame is null) return;
+        current = new FreeAreaWindow(controller, frame, null, null);
         current.Show();
         current.Activate();
     }
 
-    private FreeAreaWindow(AppController controller, Frame frame)
+    /// <summary>Ana ekrandaki düğmeden çağrılır: çeviri durdurulmuşsa pencereyi gizleyip masaüstünü yakalar.</summary>
+    public static async Task OpenFromDesktopAsync(AppController controller, Window? owner)
+    {
+        if (current is not null)
+        {
+            current.Activate();
+            return;
+        }
+        if (controller.IsRunning && controller.LastFrame is { } runningFrame)
+        {
+            current = new FreeAreaWindow(controller, runningFrame, null, null);
+            current.Show();
+            current.Activate();
+            return;
+        }
+
+        double previousOpacity = 1;
+        if (owner is not null)
+        {
+            previousOpacity = owner.Opacity;
+            owner.Opacity = 0;
+            await Task.Delay(140);
+        }
+        var shot = ScreenSnapshot.CaptureMonitor(owner);
+        if (shot is null)
+        {
+            if (owner is not null) owner.Opacity = previousOpacity;
+            return;
+        }
+        current = new FreeAreaWindow(controller, shot.Frame, shot, () =>
+        {
+            if (owner is not null && owner.IsLoaded)
+            {
+                owner.Opacity = previousOpacity;
+                owner.Activate();
+            }
+        });
+        current.Show();
+        current.Activate();
+    }
+
+    private FreeAreaWindow(AppController controller, Frame frame, ScreenSnapshot.Capture? shot, Action? onClose)
     {
         this.controller = controller;
         this.frame = frame;
         Title = "CouchSubs";
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
-        WindowState = WindowState.Maximized;
         Topmost = true;
         ShowInTaskbar = false;
         Background = Brushes.Black;
         Cursor = Cursors.Cross;
+        if (shot is not null)
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            var source = Application.Current?.MainWindow is { } mw ? PresentationSource.FromVisual(mw) : null;
+            var dpiX = source?.CompositionTarget?.TransformFromDevice.M11 ?? 1.0;
+            var dpiY = source?.CompositionTarget?.TransformFromDevice.M22 ?? 1.0;
+            Left = shot.PixelLeft * dpiX;
+            Top = shot.PixelTop * dpiY;
+            Width = shot.PixelWidth * dpiX;
+            Height = shot.PixelHeight * dpiY;
+        }
+        else
+        {
+            WindowState = WindowState.Maximized;
+        }
         // Başka bir üstte duran pencere öne gelirse seçim ekranı yeniden en üste konur (kapanınca kanca kalkar).
         _ = new TopmostKeeper(this);
 
@@ -66,7 +125,7 @@ public sealed class FreeAreaWindow : Window
         canvas = new Canvas { Width = frame.Width, Height = frame.Height, Background = Brushes.Transparent };
         canvas.Children.Add(new Image { Source = bitmap, Width = frame.Width, Height = frame.Height, Stretch = Stretch.Fill, IsHitTestVisible = false });
 
-        var accent = Application.Current.TryFindResource("accentBrush") as Brush ?? Brushes.Orange;
+        var accent = Application.Current?.TryFindResource("accentBrush") as Brush ?? Brushes.Orange;
         selection = new Rectangle
         {
             Stroke = accent,
@@ -77,39 +136,97 @@ public sealed class FreeAreaWindow : Window
         };
         canvas.Children.Add(selection);
 
+        sourceText = new TextBlock
+        {
+            Foreground = new SolidColorBrush(Color.FromArgb(0xB8, 0xFF, 0xFF, 0xFF)),
+            FontSize = Math.Max(13, frame.Height * 0.020),
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = frame.Width * 0.52,
+            Margin = new Thickness(0, 0, 0, frame.Height * 0.008),
+            Visibility = Visibility.Collapsed,
+        };
         resultText = new TextBlock
         {
             Foreground = Brushes.White,
-            FontSize = Math.Max(16, frame.Height * 0.032),
+            FontSize = Math.Max(16, frame.Height * 0.030),
+            FontWeight = FontWeights.SemiBold,
             TextWrapping = TextWrapping.Wrap,
-            MaxWidth = frame.Width * 0.5,
+            MaxWidth = frame.Width * 0.52,
         };
+        copyButton = new Button
+        {
+            Content = Localizer.Current["Copy"],
+            FontSize = Math.Max(13, frame.Height * 0.019),
+            Padding = new Thickness(frame.Height * 0.016, frame.Height * 0.006, frame.Height * 0.016, frame.Height * 0.006),
+            Margin = new Thickness(0, frame.Height * 0.012, 0, 0),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Cursor = Cursors.Arrow,
+            Visibility = Visibility.Collapsed,
+        };
+        copyButton.MouseLeftButtonDown += (_, e) => e.Handled = true;
+        copyButton.Click += async (_, e) =>
+        {
+            e.Handled = true;
+            if (string.IsNullOrWhiteSpace(lastTranslation)) return;
+            try
+            {
+                Clipboard.SetText(lastTranslation);
+                copyButton.Content = Localizer.Current["Copied"];
+                await Task.Delay(1400);
+                if (IsLoaded) copyButton.Content = Localizer.Current["Copy"];
+            }
+            catch { }
+        };
+        var resultStack = new StackPanel();
+        resultStack.Children.Add(sourceText);
+        resultStack.Children.Add(resultText);
+        resultStack.Children.Add(copyButton);
         resultPanel = new Border
         {
-            Background = new SolidColorBrush(Color.FromArgb(0xE6, 0, 0, 0)),
+            Background = new SolidColorBrush(Color.FromArgb(0xEB, 0x10, 0x12, 0x16)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(0x66, 0xFF, 0xFF, 0xFF)),
+            BorderThickness = new Thickness(Math.Max(1, frame.Height / 720.0)),
             CornerRadius = new CornerRadius(frame.Height * 0.012),
             Padding = new Thickness(frame.Height * 0.018),
-            Child = resultText,
+            Child = resultStack,
             Visibility = Visibility.Collapsed,
-            IsHitTestVisible = false,
         };
+        resultPanel.MouseLeftButtonDown += (_, e) => e.Handled = true;
         canvas.Children.Add(resultPanel);
 
-        var hint = new TextBlock
+        var hintRow = new StackPanel
         {
-            Text = Localizer.Current["Drag over the text you want to translate. Esc or right-click closes."],
-            Foreground = Brushes.White,
-            Background = new SolidColorBrush(Color.FromArgb(0xB3, 0, 0, 0)),
-            Padding = new Thickness(16, 8, 16, 8),
-            FontSize = 15,
+            Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Top,
             Margin = new Thickness(0, 12, 0, 0),
-            IsHitTestVisible = false,
         };
+        hintRow.Children.Add(new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(0xC8, 0, 0, 0)),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(16, 8, 16, 8),
+            IsHitTestVisible = false,
+            Child = new TextBlock
+            {
+                Text = Localizer.Current["Drag over the text you want to translate. Esc or right-click closes."],
+                Foreground = Brushes.White,
+                FontSize = 15,
+            },
+        });
+        var closeBtn = new Button
+        {
+            Content = Localizer.Current["Close"],
+            Margin = new Thickness(8, 0, 0, 0),
+            Padding = new Thickness(14, 6, 14, 6),
+            Cursor = Cursors.Arrow,
+        };
+        closeBtn.Click += (_, _) => Close();
+        hintRow.Children.Add(closeBtn);
+
         var root = new Grid();
         root.Children.Add(new Viewbox { Stretch = Stretch.Uniform, Child = canvas });
-        root.Children.Add(hint);
+        root.Children.Add(hintRow);
         Content = root;
 
         canvas.MouseLeftButtonDown += OnDown;
@@ -128,7 +245,11 @@ public sealed class FreeAreaWindow : Window
             e.Handled = true;
             Close();
         };
-        Closed += (_, _) => current = null;
+        Closed += (_, _) =>
+        {
+            current = null;
+            onClose?.Invoke();
+        };
     }
 
     private void OnDown(object sender, MouseButtonEventArgs e)
@@ -169,7 +290,7 @@ public sealed class FreeAreaWindow : Window
         switch (outcome)
         {
             case ExtraRegionOutcome.Shown when result is not null:
-                ShowResult(result.Translation, rect);
+                ShowResult(result.Translation, rect, result.Source);
                 break;
             case ExtraRegionOutcome.NoText:
                 ShowResult(text["No text found in this area."], rect);
@@ -182,8 +303,9 @@ public sealed class FreeAreaWindow : Window
                 break;
         }
 
-        // Yalnız TV'de gösteriliyorsa bilgisayar ekranının işi bitmiştir; pencere kendiliğinden kapanır.
-        if (outcome == ExtraRegionOutcome.Shown && controller.Settings.FreeAreaTarget == ResultTarget.Tv)
+        // Yalnız canlı yayın sürerken ve çıkış sadece TV ise bilgisayar ekranının işi bitmiştir; kendiliğinden kapanır.
+        if (outcome == ExtraRegionOutcome.Shown && controller.IsRunning && controller.ShowsOnTv
+            && controller.Settings.FreeAreaTarget == ResultTarget.Tv)
         {
             await Task.Delay(700);
             if (token == version && IsLoaded) Close();
@@ -191,8 +313,13 @@ public sealed class FreeAreaWindow : Window
     }
 
     /// <summary>Metni seçilen alanın altına (sığmıyorsa üstüne) koyar.</summary>
-    private void ShowResult(string text, Rect area)
+    private void ShowResult(string text, Rect area, string? source = null)
     {
+        lastTranslation = string.IsNullOrWhiteSpace(source) ? "" : text;
+        sourceText.Text = source ?? "";
+        sourceText.Visibility = string.IsNullOrWhiteSpace(source) ? Visibility.Collapsed : Visibility.Visible;
+        copyButton.Content = Localizer.Current["Copy"];
+        copyButton.Visibility = string.IsNullOrWhiteSpace(lastTranslation) ? Visibility.Collapsed : Visibility.Visible;
         resultText.Text = text;
         resultPanel.Visibility = Visibility.Visible;
         resultPanel.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));

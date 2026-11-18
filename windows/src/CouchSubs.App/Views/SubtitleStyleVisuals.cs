@@ -14,8 +14,19 @@ namespace CouchSubs.App.Views;
 /// </summary>
 internal static class SubtitleStyleVisuals
 {
-    public static FontFamily ResolveFontFamily(string? name) =>
-        new(string.IsNullOrWhiteSpace(name) ? "Segoe UI" : name);
+    private static readonly Uri FontBaseUri = new("pack://application:,,,/");
+    private static readonly HashSet<string> BundledFontFamilies = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Inter", "Saira", "Saira Condensed", "Bebas Neue",
+    };
+
+    public static FontFamily ResolveFontFamily(string? name)
+    {
+        var family = string.IsNullOrWhiteSpace(name) ? "Segoe UI" : name.Trim();
+        return BundledFontFamilies.Contains(family)
+            ? new FontFamily(FontBaseUri, $"./Assets/Fonts/#{family}")
+            : new FontFamily(family);
+    }
 
     public static Color ResolveTextColor(SubtitleStyle style) => style.TextColor switch
     {

@@ -215,6 +215,13 @@ public partial class MainView : UserControl
         catch (Exception error) { StartupGuard.Log("Deneme altyazısı gönderilemedi", error); }
     }
 
+    /// <summary>Fareyle ekrandan bölge seçip tek seferlik çeviri açar (çeviri durdurulmuşken de masaüstünü yakalar).</summary>
+    private async void OnFreeArea(object sender, RoutedEventArgs e)
+    {
+        try { await FreeAreaWindow.OpenFromDesktopAsync(controller, Window.GetWindow(this)); }
+        catch (Exception error) { StartupGuard.Log("Bölge çevirisi açılamadı", error); }
+    }
+
     /// <summary>TV'siz kurulmuş uygulamada TV'yi sonradan bağlamak için sihirbazın TV adımı açılır.</summary>
     private void OnConnectTv(object sender, RoutedEventArgs e) => controller.Step = OnboardingStep.Tv;
 

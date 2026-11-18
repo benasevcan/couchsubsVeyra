@@ -75,6 +75,12 @@
                         </Button.Style>
                     </Button>
 
+                    <!-- Fareyle ekrandan bölge seçip çevirme (çeviri kapalıyken bile çalışır) -->
+                    <Button HorizontalAlignment="Stretch" Margin="0,8,0,0" Style="{StaticResource SecondaryButton}"
+                            Content="{t:T 'Select region with mouse to translate'}"
+                            ToolTip="{t:T 'Captures screen so you can drag over any text to translate (also Num 5 while running)'}"
+                            Click="OnFreeArea" />
+
                     <!-- Durum karoları -->
                     <Grid Margin="0,12,0,0">
                         <Grid.ColumnDefinitions>

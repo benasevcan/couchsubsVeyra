@@ -78,6 +78,7 @@ public partial class SettingsWindow : Window
         CustomTextColor.Text = string.IsNullOrWhiteSpace(settings.Style.CustomTextColor) ? "#FFFFFF" : settings.Style.CustomTextColor;
         UpdateCustomColorPreview(settings.Style.TextColor, CustomTextColor.Text);
         var fontName = string.IsNullOrWhiteSpace(settings.Style.FontFamily) ? "Segoe UI" : settings.Style.FontFamily;
+        AppendInstalledFonts();
         SelectByTag(FontFamilyChoice, fontName, ignoreCase: true);
         SelectByTag(TextCaseChoice, settings.Style.TextCase.ToString());
         SelectByTag(LineSpacingChoice, settings.Style.LineSpacing.ToString());
@@ -992,6 +993,26 @@ public partial class SettingsWindow : Window
 
     private void UpdateCustomColorPreview(SubtitleTextColor color, string hex) =>
         UpdateHexColorPanel(color == SubtitleTextColor.Custom, CustomColorPanel, CustomColorPreview, hex);
+
+    private void AppendInstalledFonts()
+    {
+        var existing = new HashSet<string>(
+            FontFamilyChoice.Items.OfType<ComboBoxItem>().Select(item => item.Tag?.ToString() ?? ""),
+            StringComparer.OrdinalIgnoreCase);
+        var skip = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Webdings", "Wingdings", "Wingdings 2", "Wingdings 3", "Symbol",
+            "Marlett", "Segoe MDL2 Assets", "Segoe Fluent Icons", "HoloLens MDL2 Assets",
+        };
+        foreach (var name in System.Windows.Media.Fonts.SystemFontFamilies
+                     .Select(f => f.Source)
+                     .Where(n => !string.IsNullOrWhiteSpace(n) && !existing.Contains(n) && !skip.Contains(n))
+                     .Distinct(StringComparer.OrdinalIgnoreCase)
+                     .OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase))
+        {
+            FontFamilyChoice.Items.Add(new ComboBoxItem { Content = name, Tag = name });
+        }
+    }
 
     private void OnFontFamily(object sender, SelectionChangedEventArgs e)
     {

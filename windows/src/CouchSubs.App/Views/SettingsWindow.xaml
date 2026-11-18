@@ -251,8 +251,13 @@
                                          VerticalContentAlignment="Center" ToolTip="#RRGGBB (ör. #00FFAA)" />
                             </StackPanel>
                             <TextBlock Text="{t:T 'Font family'}" Margin="0,0,0,8" />
-                            <ComboBox x:Name="FontFamilyChoice" SelectionChanged="OnFontFamily" Margin="0,0,0,12">
+                            <ComboBox x:Name="FontFamilyChoice" MaxDropDownHeight="320" IsTextSearchEnabled="True"
+                                      SelectionChanged="OnFontFamily" Margin="0,0,0,12">
                                 <ComboBoxItem Content="{t:T 'Segoe UI (Default)'}" Tag="Segoe UI" />
+                                <ComboBoxItem Content="{t:T 'Inter (GTA 6 subtitle style)'}" Tag="Inter" />
+                                <ComboBoxItem Content="{t:T 'Saira (GTA 6 Art Deco style)'}" Tag="Saira" />
+                                <ComboBoxItem Content="{t:T 'Saira Condensed (GTA 6 heading)'}" Tag="Saira Condensed" />
+                                <ComboBoxItem Content="{t:T 'Bebas Neue (All-caps display)'}" Tag="Bebas Neue" />
                                 <ComboBoxItem Content="Arial" Tag="Arial" />
                                 <ComboBoxItem Content="Calibri" Tag="Calibri" />
                                 <ComboBoxItem Content="Noto Sans" Tag="Noto Sans" />
