@@ -66,6 +66,8 @@ final class PhoneModel: ObservableObject {
     // Çalışma durumu
     @Published private(set) var isRunning = false
     @Published private(set) var isStarting = false
+    /// Deneme modu: konsol yerine uygulamadaki örnek kareler okunur (`DemoFrameSource`); kurulum gerekmez.
+    @Published private(set) var demoMode = false
     @Published private(set) var sessionState: SessionState = .disconnected(.stopped)
     @Published private(set) var tvClients = 0
     @Published private(set) var lastSource = ""
@@ -412,10 +414,26 @@ final class PhoneModel: ObservableObject {
         return paired && (settings.output.showsOnComputer || hasTV)
     }
 
+    /// Deneme modunu açar: konsol, hesap ve TV olmadan örnek karelerle çeviri başlar (altyazı bu ekranda görünür; TV
+    /// kuruluysa orada da). Çalışan çeviri önce durdurulur.
+    func startDemo() async {
+        guard !isStarting else { return }
+        if isRunning { stop() }
+        demoMode = true
+        await start()
+        if !isRunning { demoMode = false }
+    }
+
+    /// Deneme modundan çıkar; uygulama kaldığı yere (kurulum ya da ana ekran) döner.
+    func exitDemo() {
+        stop()
+        demoMode = false
+    }
+
     func start() async {
-        guard !isRunning, !isStarting, canStart else { return }
-        let xbox = isXbox ? xboxConsole : nil
-        guard xbox != nil || console != nil && accountId != nil else { return }
+        guard !isRunning, !isStarting, canStart || demoMode else { return }
+        let xbox = isXbox && !demoMode ? xboxConsole : nil
+        guard demoMode || xbox != nil || console != nil && accountId != nil else { return }
         isStarting = true
         defer { isStarting = false }
         await refreshTranslatorStatus()
@@ -424,7 +442,11 @@ final class PhoneModel: ObservableObject {
         makePipeline()
         let session: StreamControlling
         let consoleName: String
-        if let xbox {
+        if demoMode {
+            RemotePlayLog.write("Deneme modu başladı (örnek kareler)")
+            session = DemoStream()
+            consoleName = ""
+        } else if let xbox {
             RemotePlayLog.write("Çeviri başladı; Xbox'a bağlanılıyor (Beta): \(xbox.name)")
             session = XboxStreamSession(auth: xboxAuth, console: xbox, playAudio: settings.xboxAudioOnDevice,
                                         describe: XboxText.session)
@@ -445,10 +467,13 @@ final class PhoneModel: ObservableObject {
         session.start()
         self.session = session
         startKeeper()
-        gameAreas.start()
-        gameChoice.start(console: consoleName) { [weak self] in
-            guard let self else { return false }
-            return self.settings.askGame && self.settings.sharePool
+        // Deneme karelerinde oyun yoktur: oyun sorulmaz, oyuna göre alan uygulanmaz.
+        if !demoMode {
+            gameAreas.start()
+            gameChoice.start(console: consoleName) { [weak self] in
+                guard let self else { return false }
+                return self.settings.askGame && self.settings.sharePool
+            }
         }
         isRunning = true
         startedAt = Date()
@@ -705,8 +730,15 @@ final class PhoneModel: ObservableObject {
     private func connectPacks(to pipeline: SubtitlePipeline) {
         let packs = self.packs
         let pool = self.pool
-        let active = packsActive
+        // Deneme satırları paketlerde aranmaz ve havuza önerilmez.
+        let active = packsActive && !demoMode
         let disabled = disabledPacks
+        if demoMode {
+            pipeline.packLookup = nil
+            pipeline.onPackMiss = nil
+            regionWatcher?.packLookup = nil
+            return
+        }
         // Kapatılan paket: paketler tek sözlükte birleştiği için eşleşmeyi veren paket, bulanık aramanın kapsamından
         // (son tam eşleşmenin paketi) okunur; o paket kapalıysa satır motorla çevrilir.
         pipeline.packLookup = !active ? nil : disabled.isEmpty ? { packs.match($0) } : { text in
@@ -737,7 +769,13 @@ final class PhoneModel: ObservableObject {
         translatorStatus = await Translator.status(source: settings.sourceLanguage, target: settings.targetLanguage)
     }
 
+    /// Deneme modunda seçili motor çeviremezse (dil paketi yok, ağ ya da anahtar yok) örnek satırların hazır çevirisi.
     private func makeTranslator() -> TextTranslator {
+        let translator = makeEngineTranslator()
+        return demoMode ? DemoTranslator(base: translator) : translator
+    }
+
+    private func makeEngineTranslator() -> TextTranslator {
         let (source, target) = (settings.sourceLanguage, settings.targetLanguage)
         let local = Translator(source: source, target: target,
                                cache: Self.translationCache(engine: Translator.engineID, source: source, target: target))
@@ -825,7 +863,8 @@ final class PhoneModel: ObservableObject {
 
     /// Sunucunun TV'ye gönderdiği olayların aynısı telefon ekranına da gelir (TV kurulu olmasa da).
     func phoneReceive(_ event: SubtitleEvent) {
-        guard settings.output.showsOnComputer else { return }
+        // Deneme modunda altyazı TV seçili olsa da bu ekranda görünür (TV'si olmayan da görsün).
+        guard settings.output.showsOnComputer || demoMode else { return }
         let now = clock()
         switch event {
         case .subtitle(let text, let durationMs, let paragraphs, let replaces):

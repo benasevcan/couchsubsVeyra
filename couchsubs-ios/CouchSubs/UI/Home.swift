@@ -143,6 +143,8 @@ struct HomeScreen: View {
             .buttonStyle(.mobilePrimary)
             .disabled(model.isStarting || !model.canStart)
             .tourTarget(.start)
+            // Kurulum bitmeden de uygulama örnek görüntülerle denenebilir.
+            if !model.canStart { DemoModeButton(kind: .ghost) }
         }
         .task {
             app.analytics.screen("home")
@@ -206,17 +208,21 @@ struct RunningScreen: View {
                     MobilePill(text: String(format: String(localized: "Translating · %@"), elapsed(at: context.date)),
                          live: model.sessionState == .streaming)
                 }
-                if model.packsActive { MobilePill(text: String(localized: "Ready translation"), kind: .pro) }
+                if model.packsActive && !model.demoMode { MobilePill(text: String(localized: "Ready translation"), kind: .pro) }
             }
-            if model.sessionState != .streaming {
-                MobileNote(text: model.ps5StatusText, tone: Mobile.Palette.secondary)
+            if model.demoMode {
+                DemoModeHeader()
+            } else {
+                if model.sessionState != .streaming {
+                    MobileNote(text: model.ps5StatusText, tone: Mobile.Palette.secondary)
+                }
+                // İlk altyazı gelene kadar: kolu açınca PS5'te ana hesap seçilmeli (GitHub #231).
+                if model.recentLines.isEmpty && !model.isXbox {
+                    MobileNote(text: String(localized: "When you turn on the controller to play, choose your MAIN account on the PS5. Don't play with the second account CouchSubs signs in with, or the controller won't work in the game."),
+                               tone: Mobile.Palette.secondary)
+                }
+                GameSection(choice: model.gameChoice, areas: model.gameAreas)
             }
-            // İlk altyazı gelene kadar: kolu açınca PS5'te ana hesap seçilmeli (GitHub #231).
-            if model.recentLines.isEmpty && !model.isXbox {
-                MobileNote(text: String(localized: "When you turn on the controller to play, choose your MAIN account on the PS5. Don't play with the second account CouchSubs signs in with, or the controller won't work in the game."),
-                           tone: Mobile.Palette.secondary)
-            }
-            GameSection(choice: model.gameChoice, areas: model.gameAreas)
             Tile {
                 Text("Now").font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
                 if let current = model.recentLines.first {
@@ -285,7 +291,7 @@ struct RunningScreen: View {
             // İkincil eylemler tek satırda küçük düğmeler; "Çeviriyi durdur" altta tam genişlikte.
             if model.settings.output.showsOnComputer || model.settings.output.showsOnTV || model.sessionState == .streaming {
                 HStack(spacing: Mobile.Space.gap) {
-                    if model.settings.output.showsOnComputer {
+                    if model.settings.output.showsOnComputer || model.demoMode {
                         Button { showSubtitles = true } label: { Label("Subtitle screen", systemImage: "rectangle.landscape.rotate") }
                             .buttonStyle(MobileButtonStyle(kind: .secondary, compact: true))
                     }
@@ -300,14 +306,19 @@ struct RunningScreen: View {
             }
             Button {
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                model.stop()
+                if model.demoMode { model.exitDemo() } else { model.stop() }
             } label: {
-                Label("Stop translating", systemImage: "stop.fill")
+                if model.demoMode {
+                    Label("Exit demo mode", systemImage: "xmark")
+                } else {
+                    Label("Stop translating", systemImage: "stop.fill")
+                }
             }
             .buttonStyle(.mobileDestructive)
         }
         .fullScreenCover(isPresented: $showSubtitles) { SubtitleScreen() }
-        .onAppear { if model.settings.output == .computer { showSubtitles = true } }
+        // Deneme modunda örnek görüntü bu ekranda görünsün diye altyazı ekranı kendiliğinden açılmaz.
+        .onAppear { if model.settings.output == .computer && !model.demoMode { showSubtitles = true } }
     }
 
     private var scale: Double { Double(model.settings.style.fontSize) / Double(SubtitleStyle().fontSize) }
@@ -415,6 +426,7 @@ struct SubtitleScreen: View {
     }
 
     private var statusText: String {
+        if model.demoMode { return String(localized: "Demo mode") }
         guard model.sessionState == .streaming else { return model.ps5StatusText }
         // Xbox'ta "PS5 bağlı" yazmasın: bağlı konsolun türü söylenir.
         if model.isXbox {

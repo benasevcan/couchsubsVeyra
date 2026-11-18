@@ -25,6 +25,7 @@ struct MainView: View {
                     HStack(alignment: .top, spacing: gap) {
                         ControlsColumn(width: min(Theme.size("mainColumn"), available - gap - Self.liveColumnMin))
                         VStack(alignment: .leading, spacing: gap) {
+                            if model.demoMode { DemoFrameTile(preview: model.framePreview) }
                             PackInUseTile()
                             LiveSubtitlesTile()
                         }
@@ -34,6 +35,7 @@ struct MainView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: gap) {
                             MainControls()
+                            if model.demoMode { DemoFrameTile(preview: model.framePreview) }
                             PackInUseTile()
                             LiveSubtitlesTile().frame(minHeight: Self.liveColumnMin)
                         }
@@ -107,13 +109,20 @@ struct MainControls: View {
                 TestSubtitleButton()
             }
             HStack(alignment: .top, spacing: Theme.space("gap")) {
-                StatusTile(symbol: "gamecontroller", title: "PS5", value: model.ps5StatusText,
-                           tone: AppModel.ps5Tone(model.sessionState, running: model.isRunning))
+                if model.demoMode {
+                    StatusTile(symbol: "play.rectangle", title: "Demo mode", value: model.ps5StatusText,
+                               tone: AppModel.ps5Tone(model.sessionState, running: model.isRunning))
+                } else {
+                    StatusTile(symbol: "gamecontroller", title: "PS5", value: model.ps5StatusText,
+                               tone: AppModel.ps5Tone(model.sessionState, running: model.isRunning))
+                }
                 // Altyazı yalnız bilgisayar ekranındaysa TV durumu gösterilmez.
                 if model.settings.output.showsOnTV { TVStatusTile() }
             }
             .fixedSize(horizontal: false, vertical: true)
-            if model.isRunning { GameSection(choice: model.gameChoice, areas: model.gameAreas) }
+            if model.isRunning && !model.demoMode { GameSection(choice: model.gameChoice, areas: model.gameAreas) }
+            // Kurulum bitmeden de uygulama örnek görüntülerle denenebilir.
+            if !model.canStart && !model.isRunning && !model.demoMode { DemoModeButton(kind: .ghost) }
             SubtitleOutputCard()
             // Ayar bilgisi durum karosu gibi değil, satır olarak durur (TASARIM.md › InfoCard).
             InfoCard {
@@ -136,14 +145,24 @@ private struct StartStopButton: View {
 
     var body: some View {
         Button {
-            Task { model.isRunning ? model.stop() : await model.start() }
+            if model.demoMode {
+                model.exitDemo()
+            } else {
+                Task { model.isRunning ? model.stop() : await model.start() }
+            }
         } label: {
-            Label(model.isRunning ? "Stop translating" : "Start translating",
-                  systemImage: model.isRunning ? "stop.fill" : "play.fill")
-                .font(.csHeadline)
+            Group {
+                if model.demoMode {
+                    Label("Exit demo mode", systemImage: "xmark")
+                } else {
+                    Label(model.isRunning ? "Stop translating" : "Start translating",
+                          systemImage: model.isRunning ? "stop.fill" : "play.fill")
+                }
+            }
+            .font(.csHeadline)
         }
-        .buttonStyle(CSButtonStyle(kind: model.isRunning ? .danger : .primary, fullWidth: true, height: "primaryActionHeight"))
-        .disabled(model.isStarting || (!model.isRunning && !model.canStart))
+        .buttonStyle(CSButtonStyle(kind: model.isRunning || model.demoMode ? .danger : .primary, fullWidth: true, height: "primaryActionHeight"))
+        .disabled(model.isStarting || (!model.isRunning && !model.canStart && !model.demoMode))
     }
 }
 
@@ -283,7 +302,7 @@ private struct LiveSubtitlesTile: View {
             if model.lastTranslation.isEmpty {
                 HintText(text: "Subtitles will appear here while you play.")
                 // Çeviri PS5'ten (ikinci hesap) okunurken: kolu açınca ana hesap seçilmeli (GitHub #231).
-                if model.isRunning && model.settings.frameSource == .ps5 {
+                if model.isRunning && model.settings.frameSource == .ps5 && !model.demoMode {
                     HintText(text: "When you turn on the controller to play, choose your MAIN account on the PS5. Don't play with the second account CouchSubs signs in with, or the controller won't work in the game.")
                 }
             } else {

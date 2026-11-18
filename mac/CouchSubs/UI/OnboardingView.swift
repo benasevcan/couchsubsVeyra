@@ -57,6 +57,8 @@ private struct StepButtons: View {
             if model.step != .welcome {
                 Button("Back") { model.back() }.buttonStyle(CSButtonStyle(kind: .secondary, height: "buttonLarge"))
             }
+            // Her adımda: konsolu olmayan (ve App Store incelemesi) uygulamayı örnek görüntülerle dener.
+            DemoModeButton(kind: .ghost)
             Spacer()
             if model.step == .betterTranslation && !model.usesFreeGemini {
                 // İsteğe bağlı adım: anahtar yoksa geçilir (birincil düğme adımdaki "Ücretsiz anahtar al").

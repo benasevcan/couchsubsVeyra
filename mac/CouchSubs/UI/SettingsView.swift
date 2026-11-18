@@ -141,7 +141,9 @@ private struct SettingsPage: View {
             case .language: LanguageCard()
             case .area: AreaCards()
             case .obs: OBSCard()
-            case .source: FrameSourceCard()
+            case .source:
+                FrameSourceCard()
+                DemoModeCard()
             case .ps5: LoginPasscodeCard()
             case .about:
                 AppThemeCard()

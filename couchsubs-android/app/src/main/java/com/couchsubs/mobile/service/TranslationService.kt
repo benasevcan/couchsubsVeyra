@@ -20,6 +20,7 @@ import com.couchsubs.mobile.Services
 import com.couchsubs.mobile.account.Backend
 import com.couchsubs.mobile.account.Telemetry
 import com.couchsubs.mobile.core.CropRegion
+import com.couchsubs.mobile.core.DemoTranslator
 import com.couchsubs.mobile.core.active
 import com.couchsubs.mobile.core.GamePackLibrary
 import com.couchsubs.mobile.core.GameSense
@@ -40,6 +41,7 @@ import com.couchsubs.mobile.remoteplay.FrameSourceFactory
 import com.couchsubs.mobile.remoteplay.RegisteredConsole
 import com.couchsubs.mobile.remoteplay.FrameSources
 import com.couchsubs.mobile.remoteplay.NativeBridge
+import com.couchsubs.mobile.remoteplay.SampleFrameSource
 import com.couchsubs.mobile.remoteplay.SessionState
 import com.couchsubs.mobile.remoteplay.StreamSession
 import com.couchsubs.mobile.settings.AppSettings
@@ -80,6 +82,18 @@ class TranslationService : Service() {
 
         fun start(context: Context) {
             context.startForegroundService(Intent(context, TranslationService::class.java))
+        }
+
+        /** Sıradaki başlatma deneme modunda mı (bkz. [startDemo]); hizmet başlarken okunup sıfırlanır. */
+        @Volatile private var demoRequested = false
+
+        /**
+         * Deneme modu: konsol, hesap ve TV olmadan kodda çizilmiş örnek karelerle ([SampleFrameSource]) çeviri başlar;
+         * hattın geri kalanı (yazı tanıma, çeviri, telefon/TV) gerçekteki gibi çalışır (iPhone ve Mac ile aynı).
+         */
+        fun startDemo(context: Context) {
+            demoRequested = true
+            start(context)
         }
 
         fun stop(context: Context) {
@@ -143,6 +157,8 @@ class TranslationService : Service() {
     private val lifecycle = Any()
     @Volatile private var destroyed = false
     @Volatile private var streaming = false
+    /** Bu oturum deneme modunda (örnek kareler; bkz. [startDemo]). */
+    @Volatile private var demo = false
     private var begun = false
     @Volatile private var styleListener: android.content.SharedPreferences.OnSharedPreferenceChangeListener? = null
     @Volatile private var targetListener: android.content.SharedPreferences.OnSharedPreferenceChangeListener? = null
@@ -188,22 +204,27 @@ class TranslationService : Service() {
     }
 
     private fun begin() {
-        val xbox = settings.xbox
+        demo = demoRequested
+        demoRequested = false
+        val xbox = settings.xbox && !demo
         val console = settings.console
         val accountId = settings.accountId
         // Xbox (Beta): Microsoft girişi ve seçili Xbox yeter; PSN ve PS5 eşlemesi gerekmez.
-        if (xbox && (settings.xboxConsole == null || !Services.xboxAuth.signedIn)) {
+        if (demo) {
+            // Deneme modunda eşleme gerekmez.
+        } else if (xbox && (settings.xboxConsole == null || !Services.xboxAuth.signedIn)) {
             LiveState.update { it.copy(running = false, error = getString(R.string.error_xbox_not_ready)) }
             stopSelf()
             return
         }
-        if (!xbox && (console == null || accountId == null)) {
+        if (!demo && !xbox && (console == null || accountId == null)) {
             LiveState.update { it.copy(running = false, error = getString(R.string.error_not_paired)) }
             stopSelf()
             return
         }
         // Yerine geçen kaynak yalnız debug yapısında kurulur (Play görüntüleri için kayıtlı klip); PS5 kitaplığı gerekmez.
-        val replacement = FrameSources.replacement
+        val replacement = if (demo) FrameSourceFactory { _, onFrame, onState -> SampleFrameSource(onFrame, onState) }
+            else FrameSources.replacement
         if (replacement == null && !xbox && !NativeBridge.available) {
             LiveState.update { it.copy(running = false, error = getString(R.string.error_native)) }
             stopSelf()
@@ -213,7 +234,7 @@ class TranslationService : Service() {
         settings.translating = true
         Backend.breadcrumb("çeviri: başlıyor (${settings.target.name}, ${settings.engine.name}, paketler ${settings.packsEnabled})")
         startedAt = System.currentTimeMillis()
-        LiveState.update { LiveStatus(running = true, phase = getString(R.string.phase_preparing), startedAt = startedAt, engineLabel = engineLabel()) }
+        LiveState.update { LiveStatus(running = true, demo = demo, phase = getString(R.string.phase_preparing), startedAt = startedAt, engineLabel = engineLabel()) }
         Telemetry.event(Telemetry.SESSION_START, "target" to settings.target.name.lowercase(), "engine" to settings.engine.name.lowercase(),
             "packs" to settings.packsEnabled)
         // Paketlerin açılması, çeviri modeli ve sunucu kurulumu ana iş parçacığında yapılırsa zayıf telefonda
@@ -236,7 +257,7 @@ class TranslationService : Service() {
     }
 
     private fun setup(console: RegisteredConsole?, accountId: ByteArray?, replacement: FrameSourceFactory?) {
-        val xboxConsole = if (settings.xbox) settings.xboxConsole else null
+        val xboxConsole = if (settings.xbox && !demo) settings.xboxConsole else null
         // Paketler ücretsiz: uygulamayla gelenler ve sunucudan inmiş güncel sürümler. Ayardan kapatılırsa aranmaz.
         val library = Services.packLibrary(this)
         packs = library
@@ -244,7 +265,7 @@ class TranslationService : Service() {
         val glossary = Glossary.load(this)
         glossaryInUse = glossary
         val free = MlKitTranslator(cache(MlKitTranslator.ENGINE_ID), glossary).also { freeTranslator = it }
-        val translator = onlineTranslator(free) ?: free
+        val translator = engineTranslator(free)
         val subtitleServer = SubtitleServer().also { server = it }
         subtitleServer.sendsToTv = settings.target == SubtitleTarget.TV
         subtitleServer.onClientsChanged = { count ->
@@ -280,7 +301,8 @@ class TranslationService : Service() {
         pool = linePool
         // Paketler burada açılır (ilk altyazı beklemesin); kapalıysa hiç açılmaz. Bellek yetmezse paketsiz sürülür:
         // çeviri motoru çalışır, uygulama kapanmaz ve PS5 bağlantısı kopmaz.
-        var packTitles = if (!settings.packsEnabled) null else try {
+        // Deneme satırları paketlerde aranmaz.
+        var packTitles = if (!settings.packsEnabled || demo) null else try {
             library.infos.associate { it.id to it.title }
         } catch (error: OutOfMemoryError) {
             Log.e(TAG, "packs", error)
@@ -319,7 +341,7 @@ class TranslationService : Service() {
         // ortak havuza önerilmez (arayüz yazıları havuzu kirletmesin). Mac ve iPhone ile aynı.
         val areaReader = SubtitleReader().also { regionReader = it }
         regionWatcher = com.couchsubs.mobile.core.RegionWatcher({ crop -> areaReader.read(crop.pixels as RegionPixels) },
-            onlineTranslator(free.separate()) ?: free.separate(), subtitleServer).apply {
+            engineTranslator(free.separate()), subtitleServer).apply {
             packLookup = { text -> if (packTitles != null && settings.packsEnabled) PackLookup.match(library, text) else null }
         }
         background.scheduleWithFixedDelay({ linePool.flush() }, LinePool.FLUSH_INTERVAL_MS, LinePool.FLUSH_INTERVAL_MS, TimeUnit.MILLISECONDS)
@@ -329,7 +351,8 @@ class TranslationService : Service() {
                 free.prepare()
             } catch (error: Exception) {
                 Log.w(TAG, "ML Kit model", error)
-                LiveState.update { it.copy(error = getString(R.string.error_model)) }
+                // Deneme modu model olmadan da hazır çeviriyle sürer; uyarı gösterilmez.
+                if (!demo) LiveState.update { it.copy(error = getString(R.string.error_model)) }
             }
         }
 
@@ -478,7 +501,7 @@ class TranslationService : Service() {
                 val reader = screenReader ?: SubtitleReader().also { screenReader = it }
                 val reading = reader.read(pixels)
                 // Yapay zekâda ekranın bütün yazıları tek istekte gider (bkz. AiTranslator.translateAll).
-                val translator = onlineTranslator(free.separate()) ?: free.separate()
+                val translator = engineTranslator(free.separate())
                 val items = ScreenTranslation.translate(reading, translator, { screenGeneration.get() != generation }) { shown ->
                     if (screenGeneration.get() != generation) return@translate
                     val milliseconds = ScreenTranslation.displayMilliseconds(shown)
@@ -531,6 +554,10 @@ class TranslationService : Service() {
     }
 
     /** Çevrimiçi motor seçilip anahtarı girildiyse o, hatada yerel motor; yoksa null. */
+    /** Seçili motor; deneme modunda motor çeviremezse örnek satırların hazır çevirisi ([DemoTranslator]). */
+    private fun engineTranslator(free: TextTranslator): TextTranslator =
+        (onlineTranslator(free) ?: free).let { if (demo) DemoTranslator(it) else it }
+
     private fun onlineTranslator(free: TextTranslator): TextTranslator? {
         val engine = settings.engine
         val key = settings.apiKey(engine)?.takeIf { it.isNotBlank() } ?: return null

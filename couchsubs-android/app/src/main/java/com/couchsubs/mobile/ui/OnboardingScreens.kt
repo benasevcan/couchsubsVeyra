@@ -58,7 +58,7 @@ import kotlinx.coroutines.withContext
 
 /** Karşılama: üç sayfa, yatay kaydırma, nokta göstergesi; otomatik geçiş yok. */
 @Composable
-fun WelcomeScreen(onDone: () -> Unit) {
+fun WelcomeScreen(onDemo: () -> Unit = {}, onDone: () -> Unit) {
     val pager = rememberPagerState { 3 }
     val scope = rememberCoroutineScope()
     val last = pager.currentPage == 2
@@ -74,6 +74,8 @@ fun WelcomeScreen(onDone: () -> Unit) {
         PrimaryButton(stringResource(if (last) R.string.welcome_start else R.string.next)) {
             if (last) onDone() else scope.launch { pager.animateScrollToPage(pager.currentPage + 1) }
         }
+        // Kurulumdan önce: konsolu olmayan (ve mağaza incelemesi) uygulamayı örnek görüntülerle dener.
+        GhostButton(stringResource(R.string.demo_mode_try), Modifier.fillMaxWidth(), onClick = onDemo)
     }) {
         HorizontalPager(pager, Modifier.fillMaxWidth().weight(1f)) { page ->
             Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.gap, Alignment.Bottom)) {

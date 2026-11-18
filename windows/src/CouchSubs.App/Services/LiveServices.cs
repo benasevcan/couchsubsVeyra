@@ -43,6 +43,8 @@ public sealed class LiveServices : IAppServices
     public Task<AiTestResult> TestLocalAiAsync(LocalAiServer server, string key) =>
         AiTranslator.TestAsync(AiProvider.Local, key, server.Model, server: server);
     public IDubbingModel? Dubbing { get; } = PocketDubbingModel.EngineBundled ? new PocketDubbingModel() : null;
+    private readonly AdvancedOcrModel advancedOcr = new();
+    public IOcrModel? AdvancedOcr => advancedOcr;
     public IDubbingModel? FastDubbing { get; } = WindowsVoiceModel.Available ? new WindowsVoiceModel() : null;
     public IAudioOutput? Audio { get; } = new WindowsAudioOutput();
     public IUpdater? Updater { get; } = new Updater();
@@ -340,6 +342,22 @@ public sealed class LiveServices : IAppServices
         WindowsOcrReader.DictionaryScore = dictionary ? WindowsSpellCheck.Score : null;
         return reader;
     }
+    public ITextReader? MakeReader(string language, OcrEngine engine)
+    {
+        var reader = MakeReader(language);
+        // Seçim Windows'a dönünce gelişmiş okuyucunun oturumları bırakılır (ekran kartı belleği boşalır).
+        if (engine != OcrEngine.Advanced)
+        {
+            PaddleOcrReader.ReleaseAll();
+            return reader;
+        }
+        // Sözlük ve bekletme ayarları (yukarıda) iki okuyucuda da geçerlidir; gelişmiş okuyucu açılamazsa Windows'unki kalır.
+        // Okurken art arda hata verirse (ör. DirectML "device removed") oturumları bırakılır ve bu hatta Windows'unki okur.
+        if (advancedOcr.IsInstalled && PaddleOcrReader.Create(advancedOcr.Directory, language) is { } advanced)
+            return new FallbackTextReader(advanced, reader, advanced.Release);
+        return reader;
+    }
+
     public bool HasOcrLanguage(string language) => WindowsOcrReader.HasLanguage(language);
 
     /// <summary>Denetlenemeyen TV'ler için: TV uygulaması kendisi bağlanır.</summary>

@@ -78,7 +78,8 @@ struct RootView: View {
 
     var body: some View {
         Group {
-            if model.step == .done { MainView() } else { OnboardingView() }
+            // Deneme modu kurulumdan bağımsızdır: sihirbazın hangi adımından açılırsa açılsın ana pencere görünür.
+            if model.step == .done || model.demoMode { MainView() } else { OnboardingView() }
         }
         .sheet(isPresented: $model.showAbout) { AboutView().appSurface() }
     }

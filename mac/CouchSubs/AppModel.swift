@@ -118,6 +118,24 @@ protocol KeeperControlling: AnyObject {
 extension StreamSession: StreamControlling {}
 extension TVKeeper: KeeperControlling {}
 
+/// Deneme modunun "konsolu": uygulamadaki örnek kareleri (`DemoFrameSource`) akış gibi verir; ağ kullanmaz.
+final class DemoStream: StreamControlling {
+    var onFrame: ((CGImage) -> Void)?
+    var onState: ((SessionState) -> Void)?
+    var onConsoleMoved: ((RegisteredConsole) -> Void)?
+    private let source = DemoFrameSource()
+
+    func start() {
+        source.onFrame = { [weak self] frame in self?.onFrame?(frame) }
+        source.start()
+        onState?(.streaming)
+    }
+
+    func stop() { source.stop() }
+
+    func reconnectNow() {}
+}
+
 final class LiveServices: AppServices {
     func discoverConsoles() async -> [ConsoleInfo] {
         let found = await Console.discover()
@@ -469,6 +487,8 @@ final class AppModel: ObservableObject {
     // Çalışma durumu
     @Published var isRunning = false
     @Published var isStarting = false
+    /// Deneme modu: konsol yerine uygulamadaki örnek kareler okunur (`DemoFrameSource`); kurulum gerekmez.
+    @Published private(set) var demoMode = false
     @Published var sessionState: SessionState = .disconnected(.stopped)
     /// Çeviri sürerken Mac'in boşta uykuya geçmesi engellenir (kullanıcı TV'de oynuyor, Mac'e dokunmuyor).
     var isPreventingSleep: Bool { sleepActivity != nil }
@@ -787,6 +807,13 @@ final class AppModel: ObservableObject {
     private func connectPacks(to pipeline: SubtitlePipeline) {
         let packs = self.packs
         let pool = self.pool
+        // Deneme satırları paketlerde aranmaz ve havuza önerilmez.
+        if demoMode {
+            pipeline.packLookup = nil
+            pipeline.onPackMiss = nil
+            regionWatcher?.packLookup = nil
+            return
+        }
         let active = settings.gamePacks && settings.sourceLanguage == "en" && settings.targetLanguage == "tr"
         pipeline.packLookup = active ? { packs.match($0) } : nil
         pipeline.packName = { packs.searchScope }
@@ -1221,12 +1248,29 @@ final class AppModel: ObservableObject {
 
     // MARK: - Çeviri
 
+    /// Deneme modunu açar: konsol, hesap ve TV olmadan örnek karelerle çeviri başlar (altyazı ana pencerede ve seçiliyse
+    /// bilgisayar ekranında ya da TV'de). Çalışan çeviri önce durdurulur.
+    func startDemo() async {
+        guard !isStarting else { return }
+        if isRunning { stop() }
+        demoMode = true
+        showSettings = false
+        await start()
+        if !isRunning { demoMode = false }
+    }
+
+    /// Deneme modundan çıkar; uygulama kaldığı yere (kurulum ya da ana ekran) döner.
+    func exitDemo() {
+        stop()
+        demoMode = false
+    }
+
     func start() async {
         // Düğmeye iki kez basılması ya da beklerken tekrar çağrılması ikinci bir oturum açmaz.
-        guard !isRunning, !isStarting, canStart else { return }
+        guard !isRunning, !isStarting, canStart || demoMode else { return }
         // PS5'e bağlanmak için eşleşmiş PS5 ve ikinci hesap gerekir; PS Remote Play penceresinden okumak için gerekmez.
-        let readsWindow = settings.frameSource == .remotePlayWindow
-        guard readsWindow || (console != nil && accountId != nil) else { return }
+        let readsWindow = settings.frameSource == .remotePlayWindow && !demoMode
+        guard demoMode || readsWindow || (console != nil && accountId != nil) else { return }
         isStarting = true
         defer { isStarting = false }
 
@@ -1240,10 +1284,13 @@ final class AppModel: ObservableObject {
         if settings.dubbing.enabled, dubbingModelReady { makeDubber().prepare() }
         SubtitleLog.write("oturum başladı: CouchSubs \(AppIdentity.version), \(settings.sourceLanguage)→\(settings.targetLanguage), "
             + "motor: \(onlineTranslationActive ? settings.onlineEngine.rawValue : "ücretsiz"), paketler: \(settings.gamePacks ? "açık" : "kapalı"), "
-            + "görüntü: \(readsWindow ? "PS Remote Play penceresi" : "PS5")")
+            + "görüntü: \(demoMode ? "deneme modu" : readsWindow ? "PS Remote Play penceresi" : "PS5")")
 
         let session: StreamControlling
-        if readsWindow {
+        if demoMode {
+            RemotePlayLog.write("Deneme modu başladı (örnek kareler)")
+            session = DemoStream()
+        } else if readsWindow {
             RemotePlayLog.write("Çeviri başladı; görüntü bu Mac'teki Remote Play penceresinden (\(settings.remotePlayApp.rawValue))")
             session = services.makeWindowStream(app: settings.remotePlayApp)
         } else if let console, let accountId {
@@ -1264,11 +1311,14 @@ final class AppModel: ObservableObject {
         self.session = session
 
         startKeeper()
-        gameAreas.start()
-        // Remote Play penceresinden okurken PS5 eşleşmesi olmayabilir; son oyun o zaman PS5 adı olmadan hatırlanır.
-        gameChoice.start(console: console.map { $0.name.isEmpty ? $0.host : $0.name }) { [weak self] in
-            guard let self else { return false }
-            return self.settings.askGame && self.settings.sharePool
+        // Deneme karelerinde oyun yoktur: oyun sorulmaz, oyuna göre alan uygulanmaz.
+        if !demoMode {
+            gameAreas.start()
+            // Remote Play penceresinden okurken PS5 eşleşmesi olmayabilir; son oyun o zaman PS5 adı olmadan hatırlanır.
+            gameChoice.start(console: console.map { $0.name.isEmpty ? $0.host : $0.name }) { [weak self] in
+                guard let self else { return false }
+                return self.settings.askGame && self.settings.sharePool
+            }
         }
 
         // Mac uykudan uyanınca bağlantıları hemen yenile.
@@ -1495,7 +1545,13 @@ final class AppModel: ObservableObject {
 
     // MARK: - Çevrimiçi çeviri (DeepL ve yapay zekâ)
 
+    /// Deneme modunda seçili motor çeviremezse (dil paketi yok, ağ ya da anahtar yok) örnek satırların hazır çevirisi.
     private func makeTranslator() -> TextTranslator {
+        let translator = makeEngineTranslator()
+        return demoMode ? DemoTranslator(base: translator) : translator
+    }
+
+    private func makeEngineTranslator() -> TextTranslator {
         let (source, target) = (settings.sourceLanguage, settings.targetLanguage)
         // Önceki oturumların çevirileri motor ve dil çifti başına diskte durur; tekrar eden satır hemen gelir.
         let local = Translator(source: source, target: target,
@@ -1755,6 +1811,7 @@ final class AppModel: ObservableObject {
 
     /// Ana ekrandaki PS5 durumu (eşleşmiş PS5'in adıyla).
     var ps5StatusText: String {
+        if demoMode { return String(localized: "Sample pictures") }
         if settings.frameSource == .remotePlayWindow {
             return Self.windowStatusText(sessionState, running: isRunning, installed: !remotePlayMissing)
         }

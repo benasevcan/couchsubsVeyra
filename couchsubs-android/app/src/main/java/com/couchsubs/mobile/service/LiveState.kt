@@ -9,6 +9,8 @@ import kotlinx.coroutines.flow.update
 /** Okuma hattının arayüze gösterdiği durum (servis yazar, ekranlar okur). */
 data class LiveStatus(
     val running: Boolean = false,
+    /** Deneme modu: görüntü konsoldan değil uygulamadaki örnek karelerden (bkz. TranslationService.startDemo). */
+    val demo: Boolean = false,
     /** Kısa durum metni: "PS5'e bağlanılıyor…", "Altyazılar okunuyor" gibi. */
     val phase: String = "",
     /** Konsol görüntüsü geliyor (oturum Streaming); arayüz [phase] metnini karşılaştırmak yerine buna bakar. */

@@ -516,4 +516,11 @@
     <string name="xbox_beta_note">Xbox desteği Beta. Sorun olursa bize yazın; ilk fırsatta düzeltiriz.</string>
     <string name="xbox_error_offline">İnternete bağlanılamadı. Bağlantınızı kontrol edip yeniden deneyin.</string>
     <string name="xbox_error_unexpected">Xbox hizmeti beklenmedik yanıt verdi (%1$s).</string>
+    <!-- Deneme modu (konsol olmadan örnek görüntülerle; iPhone ve Mac ile aynı) -->
+    <string name="demo_mode">Deneme modu</string>
+    <string name="demo_mode_try">Deneme modu (konsol olmadan dene)</string>
+    <string name="demo_mode_exit">Deneme modundan çık</string>
+    <string name="demo_mode_exit_short">Çık</string>
+    <string name="demo_mode_body">Deneme modu, uygulamanın tamamını içindeki örnek görüntülerle gösterir. Konsol, hesap ya da TV gerekmez.</string>
+    <string name="demo_mode_frame_note">Örnek oyun görüntüsü: uygulama içindeki İngilizce altyazıyı okur, çevirir; çeviri aşağıda ve telefon ekranında görünür.</string>
 </resources>

@@ -31,6 +31,7 @@ struct PlatformScreen: View {
                 onDone()
             }
             .buttonStyle(.mobilePrimary)
+            DemoModeButton(kind: .ghost)
         }
         .onAppear { chosen = model.platform }
     }

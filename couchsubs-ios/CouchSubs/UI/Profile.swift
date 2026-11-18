@@ -305,6 +305,31 @@ struct SettingsScreen: View {
                 NavigationLink(value: Route.about) { ListRow(symbol: "info.circle", title: "About", detail: AppIdentity.version) }
             }
             .buttonStyle(.plain)
+            // Deneme modu: konsol olmadan örnek görüntülerle (çeviri sürüyorsa önce durur).
+            Tile {
+                Text("Demo mode").font(Mobile.TypeScale.headline)
+                Text("Demo mode shows the whole app with sample pictures built into the app. No console, account or TV is needed.")
+                    .font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if model.demoMode {
+                    Button("Exit demo mode") {
+                        model.exitDemo()
+                        path.removeAll()
+                    }
+                    .buttonStyle(.mobileSecondary)
+                } else {
+                    Button {
+                        Task {
+                            await model.startDemo()
+                            path.removeAll()
+                        }
+                    } label: {
+                        Label("Try demo mode (no console needed)", systemImage: "play.rectangle")
+                    }
+                    .buttonStyle(.mobileSecondary)
+                    .disabled(model.isStarting)
+                }
+            }
         } bottom: {
             Button("Send test subtitle") { model.sendTestSubtitle() }.buttonStyle(.mobileSecondary)
         }

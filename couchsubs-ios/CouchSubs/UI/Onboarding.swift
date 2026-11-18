@@ -33,6 +33,8 @@ struct WelcomeFlow: View {
                 if page == 2 { onFinish() } else { withAnimation { page += 1 } }
             }
             .buttonStyle(.mobilePrimary)
+            // Kurulumdan önce: konsolu olmayan (ve App Store incelemesi) uygulamayı örnek görüntülerle dener.
+            DemoModeButton(kind: .ghost)
         }
     }
 

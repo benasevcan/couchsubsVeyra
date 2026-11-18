@@ -25,6 +25,24 @@ protocol KeeperControlling: AnyObject {
 extension StreamSession: StreamControlling {}
 extension TVKeeper: KeeperControlling {}
 
+/// Deneme modunun "konsolu": uygulamadaki örnek kareleri (`DemoFrameSource`) akış gibi verir; ağ kullanmaz.
+final class DemoStream: StreamControlling {
+    var onFrame: ((CGImage) -> Void)?
+    var onState: ((SessionState) -> Void)?
+    var onConsoleMoved: ((RegisteredConsole) -> Void)?
+    private let source = DemoFrameSource()
+
+    func start() {
+        source.onFrame = { [weak self] frame in self?.onFrame?(frame) }
+        source.start()
+        onState?(.streaming)
+    }
+
+    func stop() { source.stop() }
+
+    func reconnectNow() {}
+}
+
 /// Denetlenemeyen TV'ler (Android TV) için: TV uygulaması telefonu ağda kendisi bulur.
 final class IdleKeeper: KeeperControlling {
     func start(interval: Duration) {}

@@ -132,7 +132,7 @@ fun ProfileScreen(onBack: () -> Unit, onSettings: () -> Unit, onPairing: () -> U
 /** Ayarlar (tuval Telefon-Ayarlar): motor ve anahtar, altyazı görünümü, paketler, hedef, PS5, hakkında. */
 @Composable
 fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit, onPairing: () -> Unit, onTvInstall: () -> Unit = {},
-                   onPlatform: () -> Unit = {}) {
+                   onPlatform: () -> Unit = {}, onDemo: () -> Unit = {}) {
     val context = LocalContext.current
     val settings = Services.settings
     var engine by remember { mutableStateOf(settings.engine) }
@@ -333,6 +333,12 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
         Tile(Modifier.fillMaxWidth()) {
             TileLabel(stringResource(R.string.settings_tv_app))
             RowItem(stringResource(R.string.tvinstall_entry), tvAppSummary(), onClick = onTvInstall)
+        }
+        // Deneme modu: konsol olmadan örnek görüntülerle (iPhone ve Mac ile aynı; çeviri sürüyorsa önce durur).
+        Tile(Modifier.fillMaxWidth()) {
+            TileLabel(stringResource(R.string.demo_mode))
+            Text(stringResource(R.string.demo_mode_body), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+            SecondaryButton(stringResource(R.string.demo_mode_try), onClick = onDemo)
         }
         // Deneme altyazısı: TV'de (ya da telefon ekranında) yazının nasıl göründüğü; iPhone ile aynı.
         var testNote by remember { mutableStateOf<String?>(null) }

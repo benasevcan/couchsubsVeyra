@@ -508,4 +508,11 @@
     <string name="xbox_beta_note">Xbox support is in Beta. If something goes wrong, tell us and we\'ll fix it as soon as we can.</string>
     <string name="xbox_error_offline">Couldn\'t connect to the internet. Check your connection and try again.</string>
     <string name="xbox_error_unexpected">The Xbox service sent an unexpected reply (%1$s).</string>
+    <!-- Deneme modu (konsol olmadan örnek görüntülerle; iPhone ve Mac ile aynı) -->
+    <string name="demo_mode">Demo mode</string>
+    <string name="demo_mode_try">Try demo mode (no console needed)</string>
+    <string name="demo_mode_exit">Exit demo mode</string>
+    <string name="demo_mode_exit_short">Exit</string>
+    <string name="demo_mode_body">Demo mode shows the whole app with sample pictures built into the app. No console, account or TV is needed.</string>
+    <string name="demo_mode_frame_note">Sample game picture: the app reads the English subtitle in it, translates it and shows it below and on the phone screen.</string>
 </resources>

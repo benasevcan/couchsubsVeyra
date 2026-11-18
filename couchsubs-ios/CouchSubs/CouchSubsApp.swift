@@ -133,7 +133,10 @@ struct RootView: View {
 
     var body: some View {
         Group {
-            if !welcomeSeen {
+            // Deneme modu kurulumdan bağımsızdır: hangi adımdan açılırsa açılsın çeviri ekranı görünür.
+            if model.demoMode {
+                home
+            } else if !welcomeSeen {
                 WelcomeFlow(onFinish: finishWelcome)
             } else if model.step != .done {
                 setup
@@ -141,6 +144,7 @@ struct RootView: View {
                 home
             }
         }
+        .onChange(of: model.demoMode) { _ in path = [] }
         .preferredColorScheme(.dark)
         .tint(Mobile.Palette.accent)
         // Yazılar Dinamik Yazı'yla büyür; en büyük erişilebilirlik boylarında karolar taşmasın diye üst sınır.
@@ -222,7 +226,7 @@ struct RootView: View {
             }
         }
         .overlayPreferenceValue(TourAnchorKey.self) { anchors in
-            if !app.tourDone && path.isEmpty && !model.isRunning {
+            if !app.tourDone && path.isEmpty && !model.isRunning && !model.demoMode {
                 CoachTour(anchors: anchors) { withAnimation { app.tourDone = true } }
             }
         }

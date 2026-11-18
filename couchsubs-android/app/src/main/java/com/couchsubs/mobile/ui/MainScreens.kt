@@ -13,6 +13,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -33,6 +34,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -43,6 +45,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -50,9 +53,11 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
@@ -63,6 +68,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.couchsubs.mobile.R
 import com.couchsubs.mobile.Services
+import com.couchsubs.mobile.service.FramePreview
 import com.couchsubs.mobile.service.LiveStatus
 import com.couchsubs.mobile.settings.SubtitleTarget
 import com.couchsubs.mobile.tv.InstalledTv
@@ -108,6 +114,8 @@ fun MainScreen(
     onStop: () -> Unit,
     onPhoneView: () -> Unit,
     onTarget: () -> Unit,
+    onDemo: () -> Unit = {},
+    onExitDemo: () -> Unit = {},
     onPairing: () -> Unit,
     onPacks: () -> Unit,
     onProfile: () -> Unit,
@@ -135,11 +143,15 @@ fun MainScreen(
         // Başlatınca ve durdurunca boşta ve çeviri ekranları solarak yer değiştirir.
         AnimatedContent(status.running, transitionSpec = { fadeIn(tween(MOTION_MS)) togetherWith fadeOut(tween(MOTION_MS)) },
             label = "running") { running ->
-            if (running) RunningScreen(status, topBar, onStop, onPhoneView)
+            if (running) RunningScreen(status, topBar, if (status.demo) onExitDemo else onStop, onPhoneView)
             else ScreenScaffold(top = topBar, bottom = {
                 // PS5 eşlenmemişse (kurulum atlandı) başlatmak yerine eşleme açılır.
                 if (paired) PrimaryButton(stringResource(R.string.start), modifier = mark(TourStep.START), onClick = onStart)
-                else PrimaryButton(stringResource(R.string.main_pair_button), modifier = mark(TourStep.START), onClick = onPairing)
+                else {
+                    PrimaryButton(stringResource(R.string.main_pair_button), modifier = mark(TourStep.START), onClick = onPairing)
+                    // Kurulum bitmeden de uygulama örnek görüntülerle denenebilir.
+                    GhostButton(stringResource(R.string.demo_mode_try), Modifier.fillMaxWidth(), onClick = onDemo)
+                }
             }) {
                 if (paired) Heading(stringResource(R.string.main_ready), stringResource(R.string.main_ready_body))
                 else {
@@ -182,7 +194,7 @@ fun MainScreen(
                 ))
             }
         }
-        tour?.let { step ->
+        if (!status.demo) tour?.let { step ->
             TourOverlay(step, bounds[step], onSkip = {
                 settings.tourShown = true
                 tour = null
@@ -214,6 +226,28 @@ fun engineName(context: Context): String = when (Services.settings.engine) {
     com.couchsubs.mobile.settings.EngineChoice.CLAUDE -> "Claude"
 }
 
+/** Deneme modunda çeviri ekranının üstü: "Deneme modu" rozeti, "Çık" ve hattın okuduğu örnek kare (iPhone ile aynı). */
+@Composable
+private fun DemoHeader(onExit: () -> Unit) {
+    DisposableEffect(Unit) {
+        FramePreview.watch(true)
+        onDispose { FramePreview.watch(false) }
+    }
+    val frame by FramePreview.frame.collectAsState()
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Pill(stringResource(R.string.demo_mode), pro = true)
+        Spacer(Modifier.weight(1f))
+        GhostButton(stringResource(R.string.demo_mode_exit_short), onClick = onExit)
+    }
+    Tile(Modifier.fillMaxWidth()) {
+        frame?.let {
+            Image(it.asImageBitmap(), contentDescription = null, contentScale = ContentScale.FillWidth,
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.inner)))
+        }
+        Text(stringResource(R.string.demo_mode_frame_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+    }
+}
+
 /** Çeviri sürerken (tuval Telefon-Calisiyor): süre, paket, canlı satır ve önceki satırlar, sayılar. */
 @Composable
 private fun RunningScreen(status: LiveStatus, topBar: @Composable () -> Unit, onStop: () -> Unit, onPhoneView: () -> Unit) {
@@ -231,8 +265,9 @@ private fun RunningScreen(status: LiveStatus, topBar: @Composable () -> Unit, on
             SecondaryButton(stringResource(R.string.main_phone_view), Modifier.weight(1f), onClick = onPhoneView)
             if (status.streaming) ScreenTranslateButton(status, Modifier.weight(1f))
         }
-        DestructiveButton(stringResource(R.string.stop), onClick = onStop)
+        DestructiveButton(stringResource(if (status.demo) R.string.demo_mode_exit else R.string.stop), onClick = onStop)
     }) {
+        if (status.demo) DemoHeader(onStop)
         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.gap), verticalAlignment = Alignment.CenterVertically) {
             val elapsed = ((now - status.startedAt).coerceAtLeast(0) / 1000)
             // Bir saati geçince "1:12:10" (DateUtils: s:dd:ss), öncesinde "12:10"; rakamlar tablo rakamı, süre akarken kaymaz.
@@ -247,8 +282,8 @@ private fun RunningScreen(status: LiveStatus, topBar: @Composable () -> Unit, on
         AnimatedNote(status.error)
         val current = status.recent.firstOrNull()
         // İlk altyazı gelene kadar: kolu açınca PS5'te ana hesap seçilmeli (GitHub #231).
-        if (current == null && !Services.settings.xbox) NoteTile(stringResource(R.string.psn_main_account), Tokens.Color.secondary)
-        GameSection(status)
+        if (current == null && !Services.settings.xbox && !status.demo) NoteTile(stringResource(R.string.psn_main_account), Tokens.Color.secondary)
+        if (!status.demo) GameSection(status)
         Tile(Modifier.fillMaxWidth()) {
             TileLabel(stringResource(R.string.running_now))
             // Son çeviri altyazı sarısında (içerik), altında özgün metin.

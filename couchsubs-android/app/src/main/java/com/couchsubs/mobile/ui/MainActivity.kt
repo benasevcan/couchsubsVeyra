@@ -106,7 +106,7 @@ class MainActivity : ComponentActivity() {
                     popExitTransition = { slideOutOfContainer(SlideDirection.End, tween(NAV_MS), targetOffset = { it / NAV_SHIFT }) + fadeOut(tween(NAV_MS)) },
                 ) {
                     composable(Routes.WELCOME) {
-                        WelcomeScreen {
+                        WelcomeScreen(onDemo = { startDemo(navigation) }) {
                             settings.welcomeSeen = true
                             Services.applyMeasurement()
                             advance(navigation)
@@ -145,6 +145,8 @@ class MainActivity : ComponentActivity() {
                             status = status,
                             onStart = ::startTranslation,
                             onStop = { TranslationService.stop(this@MainActivity) },
+                            onDemo = { startDemo(navigation) },
+                            onExitDemo = { exitDemo(navigation) },
                             onPhoneView = { startActivity(Intent(this@MainActivity, PhoneSubtitleActivity::class.java)) },
                             onTarget = { navigation.navigate(Routes.TARGET) },
                             onPairing = { pairing(navigation) },
@@ -174,7 +176,7 @@ class MainActivity : ComponentActivity() {
                         SettingsScreen(onBack = { navigation.popBackStack() }, onPacks = { navigation.navigate(Routes.PACKS) },
                             onTarget = { navigation.navigate(Routes.TARGET) }, onPairing = { pairing(navigation) },
                             onTvInstall = { navigation.navigate(Routes.TV_INSTALL) },
-                            onPlatform = { navigation.navigate(Routes.PLATFORM) })
+                            onPlatform = { navigation.navigate(Routes.PLATFORM) }, onDemo = { startDemo(navigation) })
                     }
                     composable(Routes.HISTORY) { HistoryScreen(onBack = { navigation.popBackStack() }) }
                     composable(Routes.TV_INSTALL) {
@@ -223,6 +225,24 @@ class MainActivity : ComponentActivity() {
         val settings = Services.settings
         if (settings.xbox) navigation.navigate(if (!Services.xboxAuth.signedIn) Routes.XBOX_LOGIN else Routes.XBOX_CONSOLE)
         else navigation.navigate(if (settings.accountId == null) Routes.PSN else Routes.PAIR)
+    }
+
+    /**
+     * Deneme modu (iPhone ve Mac ile aynı): kurulumun hangi adımından açılırsa açılsın çeviri ekranı örnek karelerle
+     * açılır; çalışan çeviri önce durdurulur.
+     */
+    private fun startDemo(navigation: NavHostController) {
+        if (LiveState.status.value.running) TranslationService.stop(this)
+        // Durdurma isteği hizmete önce ulaşsın; yeni oturum ardından deneme kaynağıyla açılır.
+        window.decorView.postDelayed({ TranslationService.startDemo(this) }, if (LiveState.status.value.running) 600L else 0L)
+        navigation.navigate(Routes.MAIN) { popUpTo(0) { inclusive = true } }
+    }
+
+    /** Deneme modundan çıkar; kurulum bitmemişse eksik adıma dönülür. */
+    private fun exitDemo(navigation: NavHostController) {
+        TranslationService.stop(this)
+        val next = Routes.next()
+        if (next != Routes.MAIN) navigation.navigate(next) { popUpTo(0) { inclusive = true } }
     }
 
     private fun startTranslation() {
