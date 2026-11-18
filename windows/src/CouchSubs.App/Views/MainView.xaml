@@ -145,6 +145,14 @@
                                 </Button>
                                 <Border Style="{StaticResource InfoDivider}" />
                                 <Button Style="{StaticResource InfoRowButton}" Click="OnShortcutSettings"
+                                        AutomationProperties.Name="{t:T 'Start or stop translation'}">
+                                    <DockPanel>
+                                        <StackPanel x:Name="ToggleKeys" DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" />
+                                        <TextBlock Text="{t:T 'Start or stop translation'}" Style="{StaticResource InfoRowLabel}" TextWrapping="Wrap" Margin="0,0,8,0" />
+                                    </DockPanel>
+                                </Button>
+                                <Border Style="{StaticResource InfoDivider}" />
+                                <Button Style="{StaticResource InfoRowButton}" Click="OnShortcutSettings"
                                         AutomationProperties.Name="{t:T 'Translate screen'}">
                                     <DockPanel>
                                         <!-- Ayarlar › Kısayollar'da seçili tuşlar, her biri bir tuş; kısayol yoksa "kısayol yok" (ShowShortcutKeys). -->

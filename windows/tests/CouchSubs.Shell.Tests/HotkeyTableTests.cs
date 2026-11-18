@@ -109,4 +109,24 @@ public class HotkeyTableTests
         Assert.Equal([new HotkeyKey(HotkeyModifiers.Alt | HotkeyModifiers.Shift, 0x53)], HotkeyTable.KeysFor(loaded.Hotkeys, HotkeyAction.Screen));
         Assert.Empty(System.Text.Json.JsonSerializer.Deserialize<UserSettings>("{}")!.Hotkeys);
     }
+
+    /// Çeviri kapalıyken yalnız Başlat/Durdur kısayolları tutulur; diğer tuşlar ancak çeviri açılınca yakalanır.
+    [Fact]
+    public void ActiveBindingsKeepOnlyToggleWhileStopped()
+    {
+        var f8 = new HotkeyKey(HotkeyModifiers.None, 0x77);
+        var f9 = new HotkeyKey(HotkeyModifiers.None, 0x78);
+        var choices = HotkeyTable.Assign([], HotkeyAction.ToggleTranslation, 0, f8, out _);
+        choices = HotkeyTable.Assign(choices, HotkeyAction.Screen, 0, f9, out _);
+
+        var stopped = HotkeyTable.ActiveBindings(choices, isRunning: false);
+        Assert.Single(stopped);
+        Assert.Equal(HotkeyAction.ToggleTranslation, stopped[0].Action);
+        Assert.Equal(0x77u, stopped[0].VirtualKey);
+
+        var running = HotkeyTable.ActiveBindings(choices, isRunning: true);
+        Assert.Equal(2, running.Count);
+        Assert.Contains(running, b => b.Action == HotkeyAction.ToggleTranslation && b.VirtualKey == 0x77u);
+        Assert.Contains(running, b => b.Action == HotkeyAction.Screen && b.VirtualKey == 0x78u);
+    }
 }

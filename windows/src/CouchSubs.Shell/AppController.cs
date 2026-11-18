@@ -1318,6 +1318,18 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     // --- Çeviri ---
 
+    /// <summary>Çeviri sürüyorsa durdurur; kurulum bittiyse başlatır. Başlatma sırasında gelen çift basış yok sayılır.</summary>
+    public Task ToggleTranslationAsync()
+    {
+        if (isStarting) return Task.CompletedTask;
+        if (isRunning)
+        {
+            Stop();
+            return Task.CompletedTask;
+        }
+        return Step == OnboardingStep.Done ? StartAsync() : Task.CompletedTask;
+    }
+
     public async Task StartAsync()
     {
         // Düğmeye iki kez basılması ya da beklerken tekrar çağrılması ikinci bir oturum açmaz.

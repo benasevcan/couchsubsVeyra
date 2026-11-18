@@ -1667,6 +1667,41 @@ public class AppControllerRunTests
     [Fact]
     public void TurkishStatusTextComesFromSharedCatalog() =>
         Assert.Equal("Bağlı", AppController.StatusText(SessionState.Streaming, true, Localizer.ForLanguage("tr")));
+
+    [Fact]
+    public async Task ToggleTranslationStartsAndStopsSession()
+    {
+        var (controller, _, _) = Ready();
+        try
+        {
+            Assert.False(controller.IsRunning);
+            await controller.ToggleTranslationAsync();
+            Assert.True(controller.IsRunning);
+
+            await controller.ToggleTranslationAsync();
+            Assert.False(controller.IsRunning);
+        }
+        finally
+        {
+            controller.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task ToggleTranslationIgnoredBeforeOnboardingDone()
+    {
+        var controller = AppControllerTests.Make(new FakeServices());
+        try
+        {
+            Assert.NotEqual(OnboardingStep.Done, controller.Step);
+            await controller.ToggleTranslationAsync();
+            Assert.False(controller.IsRunning);
+        }
+        finally
+        {
+            controller.Dispose();
+        }
+    }
 }
 
 public class StatusToneTests

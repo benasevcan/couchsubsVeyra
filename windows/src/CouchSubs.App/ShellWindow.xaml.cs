@@ -24,8 +24,7 @@ public partial class ShellWindow : Window
         controller.PropertyChanged += OnChanged;
         // Bilgisayar uykudan uyanınca bağlantılar hemen yenilenir.
         SystemEvents.PowerModeChanged += OnPowerModeChanged;
-        // Kısayollar (varsayılan Num 0, 1, 2, 3, 5, 7, 8, 9 ve Ctrl+Shift+rakam; Ayarlar › Kısayollar'da değişir) yalnız
-        // çeviri sürerken tutulur.
+        // Çeviri kısayolları çeviri açıkken, "Çeviriyi başlat / durdur" kısayolu ise kapalıyken de tutulur.
         SourceInitialized += (_, _) =>
         {
             hotkeys = new GlobalHotkeys(new WindowInteropHelper(this).Handle, OnHotkey);
@@ -58,7 +57,8 @@ public partial class ShellWindow : Window
     private void OnChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(AppController.Step)) ShowScreen();
-        if (e.PropertyName is nameof(AppController.IsRunning) or nameof(AppController.HotkeysPaused) or nameof(AppController.Settings))
+        if (e.PropertyName is nameof(AppController.IsRunning) or nameof(AppController.HotkeysPaused)
+            or nameof(AppController.Settings) or nameof(AppController.Step))
             ApplyHotkeys();
     }
 
@@ -66,14 +66,30 @@ public partial class ShellWindow : Window
     private void ApplyHotkeys()
     {
         if (hotkeys is null) return;
-        hotkeys.Bindings = HotkeyTable.Resolve(controller.Settings.Hotkeys);
-        hotkeys.Enabled = controller.IsRunning && !controller.HotkeysPaused;
+        var bindings = HotkeyTable.ActiveBindings(controller.Settings.Hotkeys, controller.IsRunning);
+        hotkeys.Bindings = bindings;
+        hotkeys.Enabled = controller.Step == OnboardingStep.Done && !controller.HotkeysPaused && bindings.Count > 0;
+    }
+
+    internal static async Task ToggleTranslationAsync(AppController controller)
+    {
+        var starting = !controller.IsRunning;
+        try
+        {
+            await controller.ToggleTranslationAsync();
+        }
+        catch (Exception error)
+        {
+            StartupGuard.Log(starting ? "Çeviri başlatılamadı" : "Çeviri durdurulamadı", error);
+            StartupGuard.Show(Application.Current, StartupGuard.ErrorMessage(error));
+        }
     }
 
     private void OnHotkey(HotkeyAction action)
     {
         switch (action)
         {
+            case HotkeyAction.ToggleTranslation: _ = ToggleTranslationAsync(controller); break;
             case HotkeyAction.ExtraRegion1: _ = controller.TranslateExtraRegionAsync(1); break;
             case HotkeyAction.ExtraRegion2: _ = controller.TranslateExtraRegionAsync(2); break;
             case HotkeyAction.ExtraRegion3: _ = controller.TranslateExtraRegionAsync(3); break;

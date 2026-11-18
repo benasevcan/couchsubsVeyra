@@ -11,6 +11,8 @@ namespace CouchSubs.Shell;
 [JsonConverter(typeof(JsonStringEnumConverter<HotkeyAction>))]
 public enum HotkeyAction
 {
+    /// <summary>Çeviriyi başlat / durdur (başlamadan önce de çalışır).</summary>
+    ToggleTranslation,
     /// <summary>Num 1 / Ctrl+Shift+1: 1. ek bölgeyi bir kez çevir.</summary>
     ExtraRegion1,
     /// <summary>Num 2 / Ctrl+Shift+2: 2. ek bölgeyi bir kez çevir.</summary>
@@ -89,6 +91,7 @@ public static class HotkeyTable
     /// <summary>İşlerin rakamı: Num tuşu da Ctrl+Shift tuşu da bu rakamdır.</summary>
     public static IReadOnlyList<(HotkeyAction Action, int Digit)> Digits { get; } =
     [
+        (HotkeyAction.ToggleTranslation, -1),
         (HotkeyAction.ExtraRegion1, 1),
         (HotkeyAction.ExtraRegion2, 2),
         (HotkeyAction.ExtraRegion3, 3),
@@ -132,6 +135,13 @@ public static class HotkeyTable
     /// <summary>İşin çalışan tuşları (kapatılanlar ve çakışanlar hariç), yuva sırasıyla.</summary>
     public static IReadOnlyList<HotkeyKey> KeysFor(IReadOnlyList<HotkeyChoice>? choices, HotkeyAction action) =>
         [.. Resolve(choices).Where(b => b.Action == action).Select(b => new HotkeyKey(b.Modifiers, b.VirtualKey))];
+
+    /// <summary>
+    /// Çeviri kapalıyken yalnız başlat/durdur tuşları tutulur; açıkken kullanıcının tüm seçili tuşları tutulur.
+    /// Böylece diğer tuşlar başka uygulamalarda (ör. yazı yazarken) gereksiz yere yakalanmaz.
+    /// </summary>
+    public static IReadOnlyList<HotkeyBinding> ActiveBindings(IReadOnlyList<HotkeyChoice>? choices, bool isRunning) =>
+        isRunning ? Resolve(choices) : [.. Resolve(choices).Where(b => b.Action == HotkeyAction.ToggleTranslation)];
 
     /// <summary>
     /// İşin o yuvasına tuşu verir (null: kapatır). Tuş başka bir işte kullanılıyorsa oradan kaldırılır ve

@@ -89,8 +89,10 @@ public partial class MainView : UserControl
     {
         var text = Localizer.Current;
         var settings = controller.Settings;
+        ShowShortcutKeys(ToggleKeys, settings, HotkeyAction.ToggleTranslation, "Start or stop translation (%@)");
         ShowShortcutKeys(ScreenKeys, settings, HotkeyAction.Screen, "Translate the screen (%@)");
         ShowShortcutKeys(FreeAreaKeys, settings, HotkeyAction.FreeArea, "Select region with mouse (%@)");
+        UpdateToggleToolTip();
         EngineText.Text = settings.Engine == TranslationEngine.Free ? text["Free"] : settings.Engine.DisplayName();
         var packs = controller.InstalledPacks.Count;
         var active = settings.GamePacks && settings.SourceLanguage == "en" && settings.TargetLanguage == "tr" && packs > 0;
@@ -138,6 +140,7 @@ public partial class MainView : UserControl
         ToggleText.Text = Localizer.Current[running ? "Stop translating" : "Start translating"];
         // Altyazının gideceği bir yer yoksa (TV seçili ama bağlı değil) çeviri başlatılamaz.
         Toggle.IsEnabled = !controller.IsStarting && (running || controller.CanStart);
+        UpdateToggleToolTip();
         FreeAreaButton.IsEnabled = running && controller.LastFrame is not null;
         ModelCard.Visibility = controller.ModelInstalled ? Visibility.Collapsed : Visibility.Visible;
         EngineCard.Visibility = controller.TranslatorStatus == TranslatorStatus.EngineFailed ? Visibility.Visible : Visibility.Collapsed;
@@ -152,23 +155,17 @@ public partial class MainView : UserControl
         }
     }
 
+    private void UpdateToggleToolTip()
+    {
+        var key = HotkeyText.Keys(controller.Settings, HotkeyAction.ToggleTranslation);
+        Toggle.ToolTip = key is null ? null : $"{ToggleText.Text} ({key})";
+    }
+
     /// <summary>
     /// async void: buradan kaçan hata uygulamanın genel hata işleyicisine düşerdi. Başlatma ya da durdurma hatası
     /// kaydedilir ve gösterilir; uygulama açık kalır.
     /// </summary>
-    private async void OnToggle(object sender, RoutedEventArgs e)
-    {
-        var starting = !controller.IsRunning;
-        try
-        {
-            if (starting) await controller.StartAsync(); else controller.Stop();
-        }
-        catch (Exception error)
-        {
-            StartupGuard.Log(starting ? "Çeviri başlatılamadı" : "Çeviri durdurulamadı", error);
-            StartupGuard.Show(Application.Current, StartupGuard.ErrorMessage(error));
-        }
-    }
+    private async void OnToggle(object sender, RoutedEventArgs e) => await ShellWindow.ToggleTranslationAsync(controller);
 
     private void OnSettings(object sender, RoutedEventArgs e) => SettingsWindow.Open(Window.GetWindow(this), controller);
 

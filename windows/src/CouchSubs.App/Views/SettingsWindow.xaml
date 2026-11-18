@@ -710,7 +710,7 @@
                             <TextBlock x:Name="ShortcutError" Style="{StaticResource ErrorText}" TextWrapping="Wrap" Margin="0,12,0,0" Visibility="Collapsed" />
                             <Button Content="{t:T 'Restore defaults'}" Click="OnShortcutDefaults" HorizontalAlignment="Left" Margin="0,12,0,0" />
                             <TextBlock Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,12,0,0"
-                                       Text="{t:T 'The shortcuts work only while translating, even when CouchSubs is in the background.'}" />
+                                       Text="{t:T 'Translation shortcuts work while translating; the start/stop shortcut also works before starting, even when CouchSubs is in the background.'}" />
                         </StackPanel>
                     </c:Card>
                 </StackPanel>
