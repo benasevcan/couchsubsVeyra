@@ -3,8 +3,8 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using CouchSubs.App.Services;
 using CouchSubs.Core;
@@ -57,17 +57,32 @@ public sealed class FreeAreaWindow : Window
         Title = "CouchSubs";
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
-        WindowState = WindowState.Maximized;
+        // Katmanlı (AllowsTransparency) normal pencere kullanılır: WindowState.Maximized + saydamlık olmadan açılan
+        // WPF pencereleri ilk karede beyaz Win32/DWM arka planı parlatır ve arkadaki Veyra/DXGI yüzeyini kırar.
+        WindowState = WindowState.Normal;
+        AllowsTransparency = true;
+        Background = Brushes.Transparent;
         Topmost = true;
         ShowInTaskbar = false;
-        Background = Brushes.Black;
         Cursor = Cursors.Cross;
+        var targetMonitor = ResolveTargetMonitor();
+        ApplyInitialBounds(targetMonitor);
+        if (targetMonitor is { } bounds)
+        {
+            SourceInitialized += (_, _) =>
+            {
+                var handle = new WindowInteropHelper(this).Handle;
+                if (handle != IntPtr.Zero) OwnedWindow.PlaceWindow(handle, bounds);
+            };
+        }
         // Başka bir üstte duran pencere öne gelirse seçim ekranı yeniden en üste konur (kapanınca kanca kalkar).
         _ = new TopmostKeeper(this);
 
-        var bitmap = BitmapSource.Create(frame.Width, frame.Height, 96, 96, PixelFormats.Bgra32, null, frame.Pixels, frame.Stride);
+        var bitmap = FrameBitmap.Create(frame);
+        var image = new Image { Source = bitmap, Width = frame.Width, Height = frame.Height, Stretch = Stretch.Fill, IsHitTestVisible = false };
+        RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.LowQuality);
         canvas = new Canvas { Width = frame.Width, Height = frame.Height, Background = Brushes.Transparent };
-        canvas.Children.Add(new Image { Source = bitmap, Width = frame.Width, Height = frame.Height, Stretch = Stretch.Fill, IsHitTestVisible = false });
+        canvas.Children.Add(image);
 
         var accent = Application.Current?.TryFindResource("accentBrush") as Brush ?? Brushes.Orange;
         selection = new Rectangle
@@ -164,11 +179,12 @@ public sealed class FreeAreaWindow : Window
             Margin = new Thickness(8, 0, 0, 0),
             Padding = new Thickness(14, 6, 14, 6),
             Cursor = Cursors.Arrow,
+            Focusable = false,
         };
         closeBtn.Click += (_, _) => Close();
         hintRow.Children.Add(closeBtn);
 
-        var root = new Grid();
+        var root = new Grid { Background = Brushes.Black };
         root.Children.Add(new Viewbox { Stretch = Stretch.Uniform, Child = canvas });
         root.Children.Add(hintRow);
         Content = root;
@@ -275,6 +291,36 @@ public sealed class FreeAreaWindow : Window
         var x = Math.Clamp(area.Left, 0, Math.Max(0, frame.Width - size.Width));
         Canvas.SetLeft(resultPanel, x);
         Canvas.SetTop(resultPanel, y);
+    }
+
+    private static OwnedWindow.MonitorBounds? ResolveTargetMonitor()
+    {
+        if (OwnedWindow.IsLiveWindow(RemotePlayWindowStream.ActiveWindow)
+            && OwnedWindow.MonitorFor(RemotePlayWindowStream.ActiveWindow) is { } gameMonitor)
+            return gameMonitor;
+        var main = Application.Current?.MainWindow;
+        if (main is not null && OwnedWindow.MonitorFor(new WindowInteropHelper(main).Handle) is { } appMonitor)
+            return appMonitor;
+        return null;
+    }
+
+    private void ApplyInitialBounds(OwnedWindow.MonitorBounds? bounds)
+    {
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        if (bounds is { } b)
+        {
+            Left = b.Left / b.ScaleX;
+            Top = b.Top / b.ScaleY;
+            Width = b.Width / b.ScaleX;
+            Height = b.Height / b.ScaleY;
+        }
+        else
+        {
+            Left = 0;
+            Top = 0;
+            Width = SystemParameters.PrimaryScreenWidth;
+            Height = SystemParameters.PrimaryScreenHeight;
+        }
     }
 
     private Point ClampToFrame(Point point) => new(Math.Clamp(point.X, 0, frame.Width), Math.Clamp(point.Y, 0, frame.Height));

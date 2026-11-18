@@ -50,7 +50,11 @@ public sealed class RemotePlayWindowStream : IStreamSession
     private readonly RemotePlayApp app;
     private readonly WindowCaptureTarget? selectedWindow;
     private readonly string[] processNames;
+    private static IntPtr activeWindow;
     private readonly object gate = new();
+
+    /// <summary>Şu anda yakalanan oyunun/Remote Play uygulamasının pencere tutamağı (yoksa sıfır).</summary>
+    internal static IntPtr ActiveWindow => Volatile.Read(ref activeWindow);
     private int generation;
     private bool running;
     private CancellationTokenSource? search;
@@ -149,6 +153,7 @@ public sealed class RemotePlayWindowStream : IStreamSession
         }
         oldSearch?.Cancel();
         oldCapture?.Dispose();
+        if (oldCapture is not null) Interlocked.CompareExchange(ref activeWindow, IntPtr.Zero, oldCapture.Window);
     }
 
     // --- Pencereyi bulma ---
@@ -178,7 +183,11 @@ public sealed class RemotePlayWindowStream : IStreamSession
                         lock (gate)
                         {
                             kept = running && generation == number;
-                            if (kept) capture = started;
+                            if (kept)
+                            {
+                                capture = started;
+                                Volatile.Write(ref activeWindow, started.Window);
+                            }
                         }
                         if (!kept)
                         {
@@ -224,6 +233,7 @@ public sealed class RemotePlayWindowStream : IStreamSession
             current = ++generation;
         }
         ended.Dispose();
+        Interlocked.CompareExchange(ref activeWindow, IntPtr.Zero, ended.Window);
         RemotePlayLog.Note($"Remote Play penceresi kapandı: {why}");
         Report(SessionState.Connecting);
         StartSearch(current);
@@ -448,6 +458,7 @@ public sealed class RemotePlayWindowStream : IStreamSession
     /// <see cref="FramesPerSecond"/> kez işlemciye kopyalanıp BGRA <see cref="Frame"/> olarak verilir.</summary>
     private sealed class Capture : IDisposable
     {
+        private readonly IntPtr window;
         private readonly RemotePlayWindowStream owner;
         private readonly int number;
         private readonly IDirect3DDevice device;
@@ -465,11 +476,13 @@ public sealed class RemotePlayWindowStream : IStreamSession
         private bool disposed;
 
         public string Name { get; }
+        public IntPtr Window => window;
         public int Width => size.Width;
         public int Height => size.Height;
 
         public Capture(IntPtr window, RemotePlayWindowStream owner, int number)
         {
+            this.window = window;
             this.owner = owner;
             this.number = number;
             Native.GetWindowThreadProcessId(window, out var pid);

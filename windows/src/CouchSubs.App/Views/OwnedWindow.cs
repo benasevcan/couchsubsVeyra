@@ -67,17 +67,34 @@ internal static partial class OwnedWindow
         window.Top = top;
     }
 
+    /// <summary>Bir ekranın fiziksel piksel sınırları ve DPI ölçeği.</summary>
+    internal readonly record struct MonitorBounds(int Left, int Top, int Width, int Height, double ScaleX, double ScaleY);
+
+    /// <summary>Pencere tutamağının hâlâ geçerli bir Win32 penceresi olup olmadığını denetler.</summary>
+    internal static bool IsLiveWindow(IntPtr window) => window != IntPtr.Zero && IsWindow(window);
+
+    /// <summary>Verilen pencerenin bulunduğu ekranın fiziksel piksel sınırlarını ve etkin DPI ölçeğini verir.</summary>
+    internal static MonitorBounds? MonitorFor(IntPtr window)
+    {
+        if (MonitorInfoFor(window) is not var (monitor, info)) return null;
+        var width = info.Monitor.Right - info.Monitor.Left;
+        var height = info.Monitor.Bottom - info.Monitor.Top;
+        if (width <= 0 || height <= 0) return null;
+        var (scaleX, scaleY) = MonitorScale(monitor);
+        return new MonitorBounds(info.Monitor.Left, info.Monitor.Top, width, height, scaleX, scaleY);
+    }
+
+    /// <summary>Pencereyi yeniden boyutlandırıp verilen ekran koordinatlarına yerleştirir (odağı ve z-sırasını bozmadan).</summary>
+    internal static void PlaceWindow(IntPtr window, MonitorBounds bounds) =>
+        SetWindowPos(window, IntPtr.Zero, bounds.Left, bounds.Top, bounds.Width, bounds.Height, SwpNoZOrder | SwpNoActivate);
+
     /// <summary>Sahibin bulunduğu ekranın çalışma alanı, WPF birimlerinde (DPI'a göre çevrilmiş).</summary>
     private static Rect? OwnerWorkArea(Window owner)
     {
         try
         {
             var handle = new WindowInteropHelper(owner).Handle;
-            if (handle == IntPtr.Zero) return null;
-            var monitor = MonitorFromWindow(handle, MonitorDefaultToNearest);
-            if (monitor == IntPtr.Zero) return null;
-            var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
-            if (!GetMonitorInfo(monitor, ref info)) return null;
+            if (MonitorInfoFor(handle) is not var (_, info)) return null;
             var fromDevice = PresentationSource.FromVisual(owner)?.CompositionTarget?.TransformFromDevice;
             if (fromDevice is null) return null;
             var topLeft = fromDevice.Value.Transform(new Point(info.Work.Left, info.Work.Top));
@@ -90,7 +107,36 @@ internal static partial class OwnedWindow
         }
     }
 
+    private static (IntPtr Monitor, MonitorInfo Info)? MonitorInfoFor(IntPtr window)
+    {
+        if (window == IntPtr.Zero) return null;
+        try
+        {
+            var monitor = MonitorFromWindow(window, MonitorDefaultToNearest);
+            if (monitor == IntPtr.Zero) return null;
+            var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+            return GetMonitorInfo(monitor, ref info) ? (monitor, info) : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static (double X, double Y) MonitorScale(IntPtr monitor)
+    {
+        try
+        {
+            if (GetDpiForMonitor(monitor, 0, out var dpiX, out var dpiY) == 0 && dpiX > 0 && dpiY > 0)
+                return (dpiX / 96.0, dpiY / 96.0);
+        }
+        catch { }
+        return (1.0, 1.0);
+    }
+
     private const uint MonitorDefaultToNearest = 2;
+    private const uint SwpNoZOrder = 0x0004;
+    private const uint SwpNoActivate = 0x0010;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeRect
@@ -113,4 +159,15 @@ internal static partial class OwnedWindow
     [LibraryImport("user32.dll", EntryPoint = "GetMonitorInfoW")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsWindow(IntPtr window);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+
+    [LibraryImport("shcore.dll")]
+    private static partial int GetDpiForMonitor(IntPtr monitor, int dpiType, out uint dpiX, out uint dpiY);
 }

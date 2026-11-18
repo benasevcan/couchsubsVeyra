@@ -4,8 +4,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
+using CouchSubs.App.Services;
 using CouchSubs.Core;
 using Frame = CouchSubs.Core.Frame;
 using Handle = CouchSubs.Core.RegionEdit.Handle;
@@ -128,8 +128,7 @@ public sealed class RegionPicker : UserControl
         {
             aspect = value is { Height: > 0 } ? (double)value.Width / value.Height : 16.0 / 9;
             FitHeight();
-            image.Source = value is null ? null
-                : BitmapSource.Create(value.Width, value.Height, 96, 96, PixelFormats.Bgra32, null, value.Pixels, value.Stride);
+            image.Source = value is null ? null : FrameBitmap.Create(value);
             placeholder.Visibility = value is null ? Visibility.Visible : Visibility.Collapsed;
             Layout();
         }
