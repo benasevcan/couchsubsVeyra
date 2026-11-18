@@ -56,6 +56,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     private OnlineKeyState? onlineIssue;
     private bool ocrMissing;
     private Frame? lastFrame;
+    private long lastFrameUiAt;
     private bool modelDownloading;
     private double modelProgress;
     private string? modelError;
@@ -136,6 +137,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             CpuTranslationThreads = CpuThreadOptions.Normalize(loaded.CpuTranslationThreads, Environment.ProcessorCount),
         };
         services.SetVeyraPath(settings.VeyraExecutablePath);
+        services.SetLowLatency(settings.LowLatencyMode);
         // Uygulama oturum sürerken kapandıysa oyunun profili açık kalmış olabilir: açılışta genel alanlar geri gelir.
         if (settings.ActiveAreaProfile is not null || settings.GeneralAreas is not null) settings = settings.WithGeneralAreas();
         services.Translation.SelectCpuThreads(settings.CpuTranslationThreads);
@@ -365,7 +367,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     public bool OcrMissing { get => ocrMissing; private set => Set(ref ocrMissing, value); }
     /// <summary>Canlı altyazı çevirisi duraklatıldı (Num 0); ek bölge ve serbest alan çevirileri çalışmaya devam eder.</summary>
     public bool SubtitlesPaused { get => subtitlesPaused; private set => Set(ref subtitlesPaused, value); }
-    public Frame? LastFrame { get => lastFrame; private set => Set(ref lastFrame, value); }
+    public Frame? LastFrame => Volatile.Read(ref lastFrame);
     public string? ActiveSourceLanguage { get; private set; }
     /// <summary>Sunucunun gerçekten dinlediği port (8787 doluysa rastgele bir port).</summary>
     public int ServerPort { get; private set; } = DefaultServerPort;
@@ -389,12 +391,16 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             settingsStore.Save(value);
             if (old.VeyraExecutablePath != value.VeyraExecutablePath)
                 services.SetVeyraPath(value.VeyraExecutablePath);
+            if (old.LowLatencyMode != value.LowLatencyMode)
+                services.SetLowLatency(value.LowLatencyMode);
             server.SendStyle(value.Style);
             if (old.Output != value.Output) OutputChanged();
             if (old.Dubbing != value.Dubbing) DubbingSettingsChanged(old.Dubbing);
             if (old.GamePacks != value.GamePacks && pipeline is not null) ConnectPacks(pipeline);
             if (pipeline is not null) pipeline.ShowSpeakerNames = value.ShowSpeakerNames;
-            if ((old.MisreadWaitMs != value.MisreadWaitMs || old.PartialWaitMs != value.PartialWaitMs) && pipeline is not null) ApplyWaits(pipeline);
+            if ((old.MisreadWaitMs != value.MisreadWaitMs || old.PartialWaitMs != value.PartialWaitMs
+                 || old.LowLatencyMode != value.LowLatencyMode) && pipeline is not null)
+                ApplyWaits(pipeline);
             if (old.SharePool != value.SharePool) services.Pool?.SetEnabled(value.SharePool);
             if (old.TranslationDevice != value.TranslationDevice)
             {
@@ -432,6 +438,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             if (translationChanged && !isRunning) RefreshTranslatorStatus();
             if (isRunning && (old.SourceLanguage != value.SourceLanguage || old.TargetLanguage != value.TargetLanguage
                               || translationChanged || old.FastSubtitleDetection != value.FastSubtitleDetection
+                              || old.LowLatencyMode != value.LowLatencyMode
                               || old.OcrEngine != value.OcrEngine))
             {
                 RefreshTranslatorStatus();
@@ -1925,11 +1932,12 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     private void ConnectPacks(SubtitlePipeline target) => target.PackLookup = PacksActive ? services.FindInPacks : null;
 
-    /// <summary>Gelişmiş ayarlardaki bekleme süreleri (0–2 sn).</summary>
+    /// <summary>Gelişmiş ayarlardaki bekleme süreleri (0–2 sn); düşük gecikme modunda yarım bekleme kapatılır.</summary>
     private void ApplyWaits(SubtitlePipeline target)
     {
-        target.PackWait = Math.Clamp(settings.MisreadWaitMs, 0, 2000);
-        target.CleanWait = Math.Clamp(settings.PartialWaitMs, 0, 2000);
+        var misread = Math.Clamp(settings.MisreadWaitMs, 0, 2000);
+        target.PackWait = settings.LowLatencyMode ? Math.Min(misread, 150) : misread;
+        target.CleanWait = settings.LowLatencyMode ? 0 : Math.Clamp(settings.PartialWaitMs, 0, 2000);
     }
 
     /// <summary>Pakette olmayan İngilizce satır havuza önerilir (paketler kapalıysa da yalnız hiçbir pakette olmayanlar).</summary>
@@ -1959,9 +1967,11 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         OcrMissing = reader is null || (!(settings.OcrEngine == OcrEngine.Advanced && AdvancedOcrInstalled)
                                         && !services.HasOcrLanguage(settings.SourceLanguage));
         if (reader is null) return;
-        var scheduler = new ReadScheduler(maxReuse: settings.FastSubtitleDetection
-            ? ReadScheduler.FastMaxReuse : ReadScheduler.DefaultMaxReuse);
-        var built = new SubtitlePipeline(reader, MakeTranslator(), server, scheduler)
+        var lowLatency = settings.LowLatencyMode;
+        var scheduler = new ReadScheduler(
+            changeThreshold: lowLatency ? ReadScheduler.FastChangeThreshold : ReadScheduler.ChangeThreshold,
+            maxReuse: (lowLatency || settings.FastSubtitleDetection) ? ReadScheduler.FastMaxReuse : ReadScheduler.DefaultMaxReuse);
+        var built = new SubtitlePipeline(reader, MakeTranslator(), server, scheduler, lowLatency: lowLatency)
         {
             ShowSpeakerNames = settings.ShowSpeakerNames,
             SkipsTurkish = settings.TargetLanguage == "tr",
@@ -2264,7 +2274,12 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         var arrived = Environment.TickCount64;
         try
         {
-            post(() => LastFrame = frame);
+            var wasNull = Interlocked.Exchange(ref lastFrame, frame) is null;
+            if (wasNull || arrived - Interlocked.Read(ref lastFrameUiAt) >= 200)
+            {
+                Interlocked.Exchange(ref lastFrameUiAt, arrived);
+                post(() => Changed(nameof(LastFrame)));
+            }
             // Duraklatıldıysa kare yalnız ek bölgeler ve serbest alan için saklanır; altyazı okunmaz.
             if (subtitlesPaused) return;
             // Önceki kare hâlâ işleniyorsa bu kare atlanır; okuma kareleri biriktirmez.

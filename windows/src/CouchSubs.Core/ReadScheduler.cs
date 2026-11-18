@@ -22,6 +22,8 @@ public sealed class ReadScheduler(int changeThreshold = ReadScheduler.ChangeThre
     public const int SignatureWidth = 64, SignatureHeight = 12;
     /// <summary>Video gürültüsü bu farkı aşmaz; bir harf eklenmesi aşar.</summary>
     public const int ChangeThreshold = 16;
+    /// <summary>Düşük gecikme modunda daha duyarlı eşik; ince ya da soluk altyazı değişimleri kaçmaz.</summary>
+    public const int FastChangeThreshold = 10;
 
     private byte[]? previous;
     private string lastText = "";

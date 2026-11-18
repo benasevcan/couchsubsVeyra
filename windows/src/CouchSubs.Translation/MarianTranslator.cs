@@ -34,10 +34,14 @@ public sealed class MarianTranslator : ITextTranslator, IDisposable
     private readonly ConcurrentDictionary<string, IReadOnlyList<SpokenLine>> _speech = new(StringComparer.Ordinal);
     // Model tek seferde bir cümle çevirir: paralel çalıştırmak çekirdekleri paylaştırıp her satırı yavaşlatır.
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly object _prefetchGate = new();
+    private (string Text, CancellationTokenSource Cancel, Task Task)? _prefetch;
     private ISentenceEngine? _engine;
     /// <summary>Motor bir kez açılamadıysa nedeni; yeniden denenmez (yerel DLL süreç içinde sonradan yüklenmez).</summary>
     private Exception? _engineFailure;
     private bool _disposed;
+
+    public bool Prefetches => true;
 
     /// <summary>
     /// Motor açılamadı (ör. CTranslate2 çalışma zamanı eksik). Bir kez, arka plan iş parçacığından çağrılır;
@@ -99,14 +103,64 @@ public sealed class MarianTranslator : ITextTranslator, IDisposable
         _speakers.Learn(name);
     }
 
+    public void Prefetch(string text)
+    {
+        if (_disposed || string.IsNullOrWhiteSpace(text) || Volatile.Read(ref _engineFailure) is not null || !_isInstalled()) return;
+        CancellationTokenSource? oldCancel = null;
+        lock (_prefetchGate)
+        {
+            if (_disposed) return;
+            if (_prefetch is { } active && !active.Task.IsCompleted)
+            {
+                if (active.Text == text) return;
+                oldCancel = active.Cancel;
+            }
+            var cts = new CancellationTokenSource();
+            var task = Task.Run(async () =>
+            {
+                try { await TranslateCoreAsync(text, recordHistory: false, cts.Token).ConfigureAwait(false); }
+                catch (Exception) { }
+            });
+            _prefetch = (text, cts, task);
+        }
+        try { oldCancel?.Cancel(); }
+        catch (ObjectDisposedException) { }
+    }
+
     public async Task<string> TranslateAsync(string text, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(text);
+        Task? samePrefetch = null;
+        CancellationTokenSource? staleCancel = null;
+        lock (_prefetchGate)
+        {
+            if (_prefetch is { } active && !active.Task.IsCompleted)
+            {
+                if (active.Text == text) samePrefetch = active.Task;
+                else staleCancel = active.Cancel;
+            }
+        }
+        if (staleCancel is not null)
+        {
+            try { staleCancel.Cancel(); }
+            catch (ObjectDisposedException) { }
+        }
+        if (samePrefetch is not null)
+        {
+            try { await samePrefetch.WaitAsync(cancellationToken).ConfigureAwait(false); }
+            catch (Exception) when (!cancellationToken.IsCancellationRequested) { }
+        }
+        return await TranslateCoreAsync(text, recordHistory: true, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<string> TranslateCoreAsync(string text, bool recordHistory, CancellationToken cancellationToken)
+    {
         // Kısa cümlenin bağlamı: aynı satırdaki önceki cümle, yoksa bu satırdan önce gösterilen satırın son cümlesi.
-        var previousLine = _recent.Shown(text);
+        var previousLine = recordHistory ? _recent.Shown(text) : _recent.Peek(text);
         var pieces = SubtitleSegmenter.Split(text);
         // "OLD MAN: " → "old", "man": çok sözcüklü adın her sözcüğü ayrıca tanınır.
-        foreach (var name in pieces.Select(SubtitleSegmenter.LabelName).OfType<string>()) NoteSpeaker(name);
+        if (recordHistory)
+            foreach (var name in pieces.Select(SubtitleSegmenter.LabelName).OfType<string>()) NoteSpeaker(name);
         var previous = previousLine is null ? null : LastSentence(previousLine);
         var translations = new List<string?>(pieces.Count);
         foreach (var piece in pieces)
@@ -124,8 +178,11 @@ public sealed class MarianTranslator : ITextTranslator, IDisposable
         var final = TurkishPostEdit.Register(translations);
         var builder = new StringBuilder();
         for (var i = 0; i < pieces.Count; i++) builder.Append(final[i] ?? pieces[i].Text);
-        if (_speech.Count >= 512) _speech.Clear();
-        _speech[text] = SpeechScript.Lines(pieces, final);
+        if (recordHistory)
+        {
+            if (_speech.Count >= 512) _speech.Clear();
+            _speech[text] = SpeechScript.Lines(pieces, final);
+        }
         return builder.ToString();
     }
 
@@ -201,17 +258,26 @@ public sealed class MarianTranslator : ITextTranslator, IDisposable
 
     public void Dispose()
     {
-        _gate.Wait();
-        try
+        CancellationTokenSource? cancel = null;
+        lock (_prefetchGate)
         {
             if (_disposed) return;
             _disposed = true;
+            cancel = _prefetch?.Cancel;
+            _prefetch = null;
+        }
+        try { cancel?.Cancel(); }
+        catch (ObjectDisposedException) { }
+        _gate.Wait();
+        try
+        {
             _engine?.Dispose();
             _engine = null;
         }
         finally
         {
             _gate.Release();
+            cancel?.Dispose();
         }
     }
 }

@@ -118,4 +118,15 @@ public sealed class RecentLines
             return context;
         }
     }
+
+    /// <summary>Geçmişi değiştirmeden bu satır için kullanılacak önceki satırı okur (ön-çeviri için).</summary>
+    public string? Peek(string text)
+    {
+        lock (_gate)
+        {
+            var now = _clock();
+            if (_last is { } last && last.Text == text) return last.Context;
+            return _last is { } previous && now - previous.Seen <= MaxAge ? previous.Text : null;
+        }
+    }
 }

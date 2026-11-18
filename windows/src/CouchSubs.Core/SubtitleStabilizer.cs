@@ -36,8 +36,12 @@ public readonly record struct StabilizerNote(StabilizerNoteKind Kind, string Tex
 /// bekler. Satır ilk okunan hâliyle gönderilir (çeviri ilk karede önceden başlatıldıysa aynı metin olsun diye).
 /// Temiz satırın da beklemesi kısa görünen satırları hiç göstermiyordu.
 /// </param>
+/// <param name="fastCleanImmediate">
+/// Açıksa çöp içermeyen temiz okumalar (<see cref="LooksClean"/>) son noktalamayı beklemeden ilk karede çeviriye gider.
+/// </param>
 public sealed class SubtitleStabilizer(double similarity = 0.85, int stableFrames = 2,
-    int clearAfterMs = SubtitleStabilizer.ClearAfterMs, Func<long>? clock = null, bool cleanFastPathOnly = false)
+    int clearAfterMs = SubtitleStabilizer.ClearAfterMs, Func<long>? clock = null, bool cleanFastPathOnly = false,
+    bool fastCleanImmediate = false)
 {
     /// <summary>Bölge bu kadar boş kalırsa altyazı kalkmış sayılır; parlak arka planda kaçan birkaç okuma silmez.</summary>
     public const int ClearAfterMs = 800;
@@ -163,9 +167,12 @@ public sealed class SubtitleStabilizer(double similarity = 0.85, int stableFrame
         // (altyazılar geçişte üst üste solarken karışan okuma) beklemeden gitmez; geçiş süresinden uzun kararlıysa gider.
         // cleanFastPathOnly (Linux, Tesseract): noktalamayla bitse bile çöp parçalı okuma ilk karede gitmez.
         var garbled = OcrNoise.LooksGarbled(rawText);
+        var clean = LooksClean(rawText);
         var ready = garbled
             ? candidateCount >= stableFrames && time - candidateSince >= GarbledStableMs
-            : candidateCount >= stableFrames || (EndsSentence(rawText) && (!cleanFastPathOnly || LooksClean(rawText)));
+            : candidateCount >= stableFrames
+              || (fastCleanImmediate && clean)
+              || (EndsSentence(rawText) && (!cleanFastPathOnly || clean));
         // Gönderilenin gürültülü yeniden okuması yeni satır değildir; TV'de aynı cümle iki kez görünmesin.
         if (IsSame(text, sent))
         {

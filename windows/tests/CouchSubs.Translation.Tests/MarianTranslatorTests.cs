@@ -432,4 +432,24 @@ public class MarianTranslatorTests
         var lines = translator.SpokenLines("I told you to wait for me. Stay here!");
         Assert.Equal("Burada bekle!", lines[1].Turkish);
     }
+
+    [Fact]
+    public async Task PrefetchWarmsCacheWithoutCallingEngineTwiceOrPollutingRecentHistory()
+    {
+        var (translator, engine) = Create();
+        Assert.True(((ITextTranslator)translator).Prefetches);
+
+        ((ITextTranslator)translator).Prefetch("Follow Trevor to the dock");
+        var started = DateTime.UtcNow;
+        while (engine.Calls.Count == 0 && (DateTime.UtcNow - started).TotalSeconds < 2) await Task.Delay(10);
+
+        Assert.Equal("FOLLOW TREVOR TO THE DOCK", await translator.TranslateAsync("Follow Trevor to the dock"));
+        Assert.Single(engine.Calls);
+
+        // Ön-çeviri geçici başka bir satırla çağrılsa bile o satır önceki konuşma bağlamını bozmaz.
+        ((ITextTranslator)translator).Prefetch("Unshown transient line");
+        await Task.Delay(40);
+        await translator.TranslateAsync("Wait.");
+        Assert.Equal("Follow Trevor to the dock *** Wait.", engine.Calls[^1]);
+    }
 }

@@ -190,4 +190,19 @@ public class AreaPresetSettingsTests
         Assert.Equal(AreaPreset.Full, store.Saved?.AreaPreset);
         Assert.Equal(new CropRegion(0, 1, 0, 1), AppControllerTests.Make(settings: store).Settings.Region);
     }
+
+    [Fact]
+    public void LowLatencyModeIsOnByDefaultAndNotifiesServices()
+    {
+        var services = new FakeServices();
+        var store = new MemorySettings();
+        Assert.True(new UserSettings().LowLatencyMode);
+        Assert.True(JsonSerializer.Deserialize<UserSettings>("""{"SourceLanguage":"en"}""")!.LowLatencyMode);
+
+        var controller = AppControllerTests.Make(services: services, settings: store);
+        Assert.Equal([true], services.LowLatencyUpdates);
+        controller.Settings = controller.Settings with { LowLatencyMode = false };
+        Assert.Equal([true, false], services.LowLatencyUpdates);
+        Assert.False(AppControllerTests.Make(settings: store).Settings.LowLatencyMode);
+    }
 }

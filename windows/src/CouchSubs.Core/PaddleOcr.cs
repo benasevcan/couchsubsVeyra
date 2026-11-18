@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+using System.Buffers;
+using System.Numerics;
+
 namespace CouchSubs.Core;
 
 /// <summary>
@@ -59,6 +62,80 @@ public static class PaddleOcr
 
     private static readonly float[] DetectionMean = [0.485f, 0.456f, 0.406f];
     private static readonly float[] DetectionStd = [0.229f, 0.224f, 0.225f];
+    private static readonly float[] RecognitionMean = [0.5f, 0.5f, 0.5f];
+    private static readonly float[] RecognitionStd = [0.5f, 0.5f, 0.5f];
+
+    /// <summary>Çift tampon ayırmadan tek geçişte boyutlandırma ve BGR normalleştirme yapar.</summary>
+    private static unsafe void ResizeBgrInto(Frame image, int targetWidth, int targetHeight, int dstStride, float[] mean, float[] std, float[] dst, int offset, int plane)
+    {
+        float inv0 = 1f / (255f * std[0]), inv1 = 1f / (255f * std[1]), inv2 = 1f / (255f * std[2]);
+        float b0 = -mean[0] / std[0], b1 = -mean[1] / std[1], b2 = -mean[2] / std[2];
+        var dst0Base = offset;
+        var dst1Base = offset + plane;
+        var dst2Base = offset + (2 * plane);
+        if (targetWidth == image.Width && targetHeight == image.Height)
+        {
+            fixed (byte* srcBase = image.Pixels)
+            fixed (float* outBase = dst)
+            {
+                for (var y = 0; y < targetHeight; y++)
+                {
+                    var row = srcBase + (y * image.Stride);
+                    var rowOut = y * dstStride;
+                    for (var x = 0; x < targetWidth; x++)
+                    {
+                        var p = row + (x * 4);
+                        var i = rowOut + x;
+                        outBase[dst0Base + i] = (p[0] * inv0) + b0;
+                        outBase[dst1Base + i] = (p[1] * inv1) + b1;
+                        outBase[dst2Base + i] = (p[2] * inv2) + b2;
+                    }
+                }
+            }
+            return;
+        }
+        const int shift = 11;
+        const int scale = 1 << shift;
+        double scaleX = (double)image.Width / targetWidth, scaleY = (double)image.Height / targetHeight;
+        var x0 = targetWidth <= 2048 ? stackalloc int[targetWidth] : new int[targetWidth];
+        var x1 = targetWidth <= 2048 ? stackalloc int[targetWidth] : new int[targetWidth];
+        var wx = targetWidth <= 2048 ? stackalloc int[targetWidth] : new int[targetWidth];
+        for (var tx = 0; tx < targetWidth; tx++)
+        {
+            var sx = Math.Clamp(((tx + 0.5) * scaleX) - 0.5, 0, image.Width - 1.0);
+            var ix0 = (int)sx;
+            x0[tx] = ix0 * 4;
+            x1[tx] = Math.Min(ix0 + 1, image.Width - 1) * 4;
+            wx[tx] = (int)Math.Round((sx - ix0) * scale);
+        }
+        fixed (byte* srcBase = image.Pixels)
+        fixed (float* outBase = dst)
+        {
+            for (var ty = 0; ty < targetHeight; ty++)
+            {
+                var sy = Math.Clamp(((ty + 0.5) * scaleY) - 0.5, 0, image.Height - 1.0);
+                var iy0 = (int)sy;
+                var iy1 = Math.Min(iy0 + 1, image.Height - 1);
+                var wy = (int)Math.Round((sy - iy0) * scale);
+                var row0 = srcBase + (iy0 * image.Stride);
+                var row1 = srcBase + (iy1 * image.Stride);
+                var rowOut = ty * dstStride;
+                for (var tx = 0; tx < targetWidth; tx++)
+                {
+                    int a = x0[tx], b = x1[tx], f = wx[tx], i = rowOut + tx;
+                    for (var c = 0; c < 3; c++)
+                    {
+                        var top = (row0[a + c] << shift) + ((row0[b + c] - row0[a + c]) * f);
+                        var bottom = (row1[a + c] << shift) + ((row1[b + c] - row1[a + c]) * f);
+                        var val = Math.Clamp(((top << shift) + ((bottom - top) * wy) + (1 << (2 * shift - 1))) >> (2 * shift), 0, 255);
+                        if (c == 0) outBase[dst0Base + i] = (val * inv0) + b0;
+                        else if (c == 1) outBase[dst1Base + i] = (val * inv1) + b1;
+                        else outBase[dst2Base + i] = (val * inv2) + b2;
+                    }
+                }
+            }
+        }
+    }
 
     /// <summary>
     /// Okuma modelinin karakterleri: <c>inference.yml</c>'deki <c>PostProcess.character_dict</c> listesi. Model çıktısının
@@ -86,21 +163,22 @@ public static class PaddleOcr
 
     public static DetectionInput PrepareDetection(Frame image, int limit = DetectionLimit)
     {
+        float[]? scratch = null;
+        var (data, length, width, height) = PrepareDetectionInto(image, limit, ref scratch);
+        return data.Length == length ? new DetectionInput(data, width, height) : new DetectionInput(data[..length], width, height);
+    }
+
+    /// <summary>Tamponu yeniden kullanarak ayırma yapmadan yazı bulma girdisini hazırlar.</summary>
+    public static (float[] Data, int Length, int Width, int Height) PrepareDetectionInto(Frame image, int limit, ref float[]? scratch)
+    {
         var ratio = Math.Max(image.Width, image.Height) > limit ? (double)limit / Math.Max(image.Width, image.Height) : 1.0;
         var width = Math.Max(32, (int)Math.Round((int)(image.Width * ratio) / 32.0) * 32);
         var height = Math.Max(32, (int)Math.Round((int)(image.Height * ratio) / 32.0) * 32);
-        var resized = width == image.Width && height == image.Height ? image : image.Resized(width, height);
         var plane = width * height;
-        var data = new float[3 * plane];
-        for (var y = 0; y < height; y++)
-            for (var x = 0; x < width; x++)
-            {
-                var p = (y * resized.Stride) + (x * 4);
-                var i = (y * width) + x;
-                for (var c = 0; c < 3; c++)
-                    data[(c * plane) + i] = ((resized.Pixels[p + c] / 255f) - DetectionMean[c]) / DetectionStd[c];
-            }
-        return new DetectionInput(data, width, height);
+        var length = 3 * plane;
+        var data = scratch is not null && scratch.Length >= length ? scratch : (scratch = new float[length]);
+        ResizeBgrInto(image, width, height, width, DetectionMean, DetectionStd, data, 0, plane);
+        return (data, length, width, height);
     }
 
     /// <summary>Bulunan bir satır kutusu, özgün görüntünün pikselleriyle.</summary>
@@ -114,72 +192,87 @@ public static class PaddleOcr
     /// </summary>
     public static List<Box> FindBoxes(ReadOnlySpan<float> map, int width, int height, int sourceWidth, int sourceHeight)
     {
-        var on = new bool[width * height];
-        for (var y = 0; y < height; y++)
-            for (var x = 0; x < width; x++)
+        var total = width * height;
+        var on = ArrayPool<bool>.Shared.Rent(total);
+        var seen = ArrayPool<bool>.Shared.Rent(total);
+        try
+        {
+            Array.Clear(on, 0, total);
+            Array.Clear(seen, 0, total);
+            // cv2.dilate, 2×2 çekirdek: eşiği geçen her piksel kendisini, sağını, altını ve sağ-altını açar (iç döngü dalsız).
+            for (var y = 0; y < height; y++)
             {
-                // cv2.dilate, 2×2 çekirdek: piksel, kendisi ya da sol/üst komşularından biri eşiği geçiyorsa açık.
-                var any = false;
-                for (var dy = 0; dy <= 1 && !any; dy++)
-                    for (var dx = 0; dx <= 1 && !any; dx++)
+                var row = y * width;
+                var hasNextRow = y + 1 < height;
+                for (var x = 0; x < width; x++)
+                {
+                    if (map[row + x] <= Threshold) continue;
+                    on[row + x] = true;
+                    if (x + 1 < width)
                     {
-                        int sx = x - dx, sy = y - dy;
-                        if (sx >= 0 && sy >= 0 && map[(sy * width) + sx] > Threshold) any = true;
+                        on[row + x + 1] = true;
+                        if (hasNextRow) on[row + width + x + 1] = true;
                     }
-                on[(y * width) + x] = any;
+                    if (hasNextRow) on[row + width + x] = true;
+                }
             }
 
-        var seen = new bool[on.Length];
-        var stack = new Stack<int>();
-        var boxes = new List<Box>();
-        for (var start = 0; start < on.Length && boxes.Count < MaxCandidates; start++)
-        {
-            if (!on[start] || seen[start]) continue;
-            int x0 = width, y0 = height, x1 = -1, y1 = -1;
-            seen[start] = true;
-            stack.Push(start);
-            while (stack.Count > 0)
+            var stack = new Stack<int>();
+            var boxes = new List<Box>();
+            for (var start = 0; start < total && boxes.Count < MaxCandidates; start++)
             {
-                var i = stack.Pop();
-                int x = i % width, y = i / width;
-                x0 = Math.Min(x0, x); x1 = Math.Max(x1, x);
-                y0 = Math.Min(y0, y); y1 = Math.Max(y1, y);
-                for (var dy = -1; dy <= 1; dy++)
-                    for (var dx = -1; dx <= 1; dx++)
-                    {
-                        int nx = x + dx, ny = y + dy;
-                        if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
-                        var n = (ny * width) + nx;
-                        if (on[n] && !seen[n]) { seen[n] = true; stack.Push(n); }
-                    }
+                if (!on[start] || seen[start]) continue;
+                int x0 = width, y0 = height, x1 = -1, y1 = -1;
+                seen[start] = true;
+                stack.Push(start);
+                while (stack.Count > 0)
+                {
+                    var i = stack.Pop();
+                    int x = i % width, y = i / width;
+                    x0 = Math.Min(x0, x); x1 = Math.Max(x1, x);
+                    y0 = Math.Min(y0, y); y1 = Math.Max(y1, y);
+                    for (var dy = -1; dy <= 1; dy++)
+                        for (var dx = -1; dx <= 1; dx++)
+                        {
+                            int nx = x + dx, ny = y + dy;
+                            if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+                            var n = (ny * width) + nx;
+                            if (on[n] && !seen[n]) { seen[n] = true; stack.Push(n); }
+                        }
+                }
+                // Kenar noktaları piksel ortalarıdır (cv2.minAreaRect): kutu x1 - x0 geniştir.
+                double w = x1 - x0, h = y1 - y0;
+                if (Math.Min(w, h) < 3) continue;
+                var sum = 0.0;
+                for (var y = y0; y <= y1; y++)
+                    for (var x = x0; x <= x1; x++)
+                        sum += map[(y * width) + x];
+                if (sum / ((w + 1) * (h + 1)) < BoxThreshold) continue;
+                var distance = w * h * UnclipRatio / (2 * (w + h));
+                double left = x0 - distance, top = y0 - distance, right = x1 + distance, bottom = y1 + distance;
+                if (Math.Min(right - left, bottom - top) < 5) continue;
+                boxes.Add(new Box(
+                    Math.Clamp(Math.Round(left / width * sourceWidth), 0, sourceWidth),
+                    Math.Clamp(Math.Round(top / height * sourceHeight), 0, sourceHeight),
+                    Math.Clamp(Math.Round(right / width * sourceWidth), 0, sourceWidth),
+                    Math.Clamp(Math.Round(bottom / height * sourceHeight), 0, sourceHeight)));
             }
-            // Kenar noktaları piksel ortalarıdır (cv2.minAreaRect): kutu x1 - x0 geniştir.
-            double w = x1 - x0, h = y1 - y0;
-            if (Math.Min(w, h) < 3) continue;
-            var sum = 0.0;
-            for (var y = y0; y <= y1; y++)
-                for (var x = x0; x <= x1; x++)
-                    sum += map[(y * width) + x];
-            if (sum / ((w + 1) * (h + 1)) < BoxThreshold) continue;
-            var distance = w * h * UnclipRatio / (2 * (w + h));
-            double left = x0 - distance, top = y0 - distance, right = x1 + distance, bottom = y1 + distance;
-            if (Math.Min(right - left, bottom - top) < 5) continue;
-            boxes.Add(new Box(
-                Math.Clamp(Math.Round(left / width * sourceWidth), 0, sourceWidth),
-                Math.Clamp(Math.Round(top / height * sourceHeight), 0, sourceHeight),
-                Math.Clamp(Math.Round(right / width * sourceWidth), 0, sourceWidth),
-                Math.Clamp(Math.Round(bottom / height * sourceHeight), 0, sourceHeight)));
+            // RapidOCR'ın sıralaması: yukarıdan aşağı; üstleri 10 pikselden yakın olanlar soldan sağa.
+            boxes.Sort((a, b) => a.Top != b.Top ? a.Top.CompareTo(b.Top) : a.Left.CompareTo(b.Left));
+            for (var i = 0; i < boxes.Count - 1; i++)
+                for (var j = i; j >= 0; j--)
+                {
+                    if (Math.Abs(boxes[j + 1].Top - boxes[j].Top) < 10 && boxes[j + 1].Left < boxes[j].Left)
+                        (boxes[j], boxes[j + 1]) = (boxes[j + 1], boxes[j]);
+                    else break;
+                }
+            return boxes;
         }
-        // RapidOCR'ın sıralaması: yukarıdan aşağı; üstleri 10 pikselden yakın olanlar soldan sağa.
-        boxes.Sort((a, b) => a.Top != b.Top ? a.Top.CompareTo(b.Top) : a.Left.CompareTo(b.Left));
-        for (var i = 0; i < boxes.Count - 1; i++)
-            for (var j = i; j >= 0; j--)
-            {
-                if (Math.Abs(boxes[j + 1].Top - boxes[j].Top) < 10 && boxes[j + 1].Left < boxes[j].Left)
-                    (boxes[j], boxes[j + 1]) = (boxes[j + 1], boxes[j]);
-                else break;
-            }
-        return boxes;
+        finally
+        {
+            ArrayPool<bool>.Shared.Return(on);
+            ArrayPool<bool>.Shared.Return(seen);
+        }
     }
 
     /// <summary>Kutunun kesiti; okuma modeline gidecek satır görüntüsü.</summary>
@@ -196,27 +289,29 @@ public static class PaddleOcr
     /// </summary>
     public static (float[] Data, int Width) PrepareRecognition(IReadOnlyList<Frame> lines)
     {
+        float[]? scratch = null;
+        var (data, length, width) = PrepareRecognitionInto(lines, ref scratch);
+        return (data.Length == length ? data : data[..length], width);
+    }
+
+    /// <summary>Tamponu yeniden kullanarak ayırma yapmadan okuma toplu girdisini hazırlar.</summary>
+    public static (float[] Data, int Length, int Width) PrepareRecognitionInto(IReadOnlyList<Frame> lines, ref float[]? scratch)
+    {
         const int h = RecognitionHeight;
         var maxRatio = 320.0 / h;
         foreach (var line in lines) maxRatio = Math.Max(maxRatio, (double)line.Width / Math.Max(1, line.Height));
         var width = (int)(h * maxRatio);
         var plane = h * width;
-        var data = new float[lines.Count * 3 * plane];
+        var length = lines.Count * 3 * plane;
+        var data = scratch is not null && scratch.Length >= length ? scratch : (scratch = new float[length]);
+        Array.Clear(data, 0, length);
         for (var n = 0; n < lines.Count; n++)
         {
             var line = lines[n];
             var resizedWidth = Math.Min(width, (int)Math.Ceiling(h * ((double)line.Width / Math.Max(1, line.Height))));
-            var resized = line.Resized(Math.Max(1, resizedWidth), h);
-            var offset = n * 3 * plane;
-            for (var y = 0; y < h; y++)
-                for (var x = 0; x < resized.Width; x++)
-                {
-                    var p = (y * resized.Stride) + (x * 4);
-                    for (var c = 0; c < 3; c++)
-                        data[offset + (c * plane) + (y * width) + x] = ((resized.Pixels[p + c] / 255f) - 0.5f) / 0.5f;
-                }
+            ResizeBgrInto(line, Math.Max(1, resizedWidth), h, width, RecognitionMean, RecognitionStd, data, n * 3 * plane, plane);
         }
-        return (data, width);
+        return (data, length, width);
     }
 
     /// <summary>Latin alfabesiyle yazılan diller (oyun dili bunlardansa Çince/Japonca/Korece karakterler okuma hatasıdır).</summary>
@@ -255,9 +350,7 @@ public static class PaddleOcr
         for (var t = 0; t < steps; t++)
         {
             var row = probabilities.Slice(t * classes, classes);
-            var best = 0;
-            for (var c = 1; c < classes; c++)
-                if (row[c] > row[best]) best = c;
+            var best = BestClass(row);
             if (best != 0 && best != previous)
             {
                 text.Append(characters[best]);
@@ -267,5 +360,34 @@ public static class PaddleOcr
             previous = best;
         }
         return count == 0 ? ("", 0) : (text.ToString(), total / count);
+    }
+
+    private static int BestClass(ReadOnlySpan<float> row)
+    {
+        var classes = row.Length;
+        if (Vector.IsHardwareAccelerated && classes >= Vector<float>.Count)
+        {
+            var step = Vector<float>.Count;
+            var maxVec = new Vector<float>(row);
+            var limit = classes - (classes % step);
+            var idx = step;
+            for (; idx < limit; idx += step)
+                maxVec = Vector.Max(maxVec, new Vector<float>(row.Slice(idx, step)));
+            var bestVal = row[0];
+            for (var k = 0; k < step; k++)
+                if (maxVec[k] > bestVal) bestVal = maxVec[k];
+            for (; idx < classes; idx++)
+                if (row[idx] > bestVal) bestVal = row[idx];
+            if (bestVal > row[0])
+            {
+                var found = row.IndexOf(bestVal);
+                if (found >= 0) return found;
+            }
+            return 0;
+        }
+        var best = 0;
+        for (var c = 1; c < classes; c++)
+            if (row[c] > row[best]) best = c;
+        return best;
     }
 }

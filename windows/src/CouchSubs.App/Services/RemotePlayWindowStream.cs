@@ -24,20 +24,23 @@ namespace CouchSubs.App.Services;
 /// </summary>
 public sealed class RemotePlayWindowStream : IStreamSession
 {
-    /// <summary>Saniyedeki kare. Okuma bir önceki kare bitmeden yenisini zaten almaz; fazlası yalnız işlemciyi yorar.</summary>
-    private const int FramesPerSecond = 10;
+    /// <summary>Normal ve düşük gecikme modunda saniyedeki kare hızı.</summary>
+    private const int DefaultFramesPerSecond = 15;
+    private const int LowLatencyFramesPerSecond = 25;
     /// <summary>Remote Play'in küçük pencereleri (giriş, denetim) oyun penceresi sanılmasın.</summary>
     private const int MinimumWidth = 400, MinimumHeight = 250;
     private static readonly TimeSpan SearchInterval = TimeSpan.FromSeconds(2);
     /// <summary>İlk kare gelmeden siyah gelirse yakalama engelleniyor olabilir; sahne kararması için daha uzun beklenir.</summary>
-    private const int BlackFramesBeforeWarning = FramesPerSecond * 4;
-    private const int BlackFramesAfterContentWarning = FramesPerSecond * 15;
+    private const long BlackMsBeforeWarning = 4_000;
+    private const long BlackMsAfterContentWarning = 15_000;
 
     private static readonly string[] SonyProcesses = ["RemotePlay"];
     private static readonly string[] ChiakiProcesses = ["chiaki", "chiaki-ng"];
     private static readonly string[] VeyraProcesses = ["veyra_qml_ui", "veyra"];
 
     public static string? CustomVeyraPath { get; set; }
+    /// <summary>Düşük gecikme modunda yakalama hızı 25 FPS'ye çıkarılır.</summary>
+    public static bool LowLatencyCapture { get; set; } = true;
 
     public event Action<Frame>? FrameReceived;
     public event Action<SessionState>? StateChanged;
@@ -448,13 +451,14 @@ public sealed class RemotePlayWindowStream : IStreamSession
         private readonly RemotePlayWindowStream owner;
         private readonly int number;
         private readonly IDirect3DDevice device;
+        private readonly Direct3D.StagingReader staging;
         private readonly GraphicsCaptureItem item;
         private readonly Direct3D11CaptureFramePool pool;
         private readonly GraphicsCaptureSession session;
         private readonly Stopwatch clock = Stopwatch.StartNew();
         private long lastFrameMs = -1000;
         private int busy;
-        private int blackFrames;
+        private long? blackSinceMs;
         private bool seenContent;
         private bool warnedBlack;
         private Windows.Graphics.SizeInt32 size;
@@ -475,7 +479,7 @@ public sealed class RemotePlayWindowStream : IStreamSession
                 Name = process.ProcessName;
             }
             catch (Exception) { Name = "Remote Play"; }
-            device = Direct3D.CreateDevice();
+            (device, staging) = Direct3D.CreateDevice();
             item = CaptureInterop.CreateItemForWindow(window);
             size = item.Size;
             pool = Direct3D11CaptureFramePool.CreateFreeThreaded(device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, size);
@@ -536,19 +540,26 @@ public sealed class RemotePlayWindowStream : IStreamSession
                 return;
             }
             var now = clock.ElapsedMilliseconds;
-            if (now - lastFrameMs < 1000 / FramesPerSecond) return;
+            var fps = LowLatencyCapture ? LowLatencyFramesPerSecond : DefaultFramesPerSecond;
+            if (now - lastFrameMs < 1000 / fps) return;
             // Önceki kare hâlâ kopyalanıyorsa bu kare atlanır.
             if (Interlocked.Exchange(ref busy, 1) == 1) return;
             lastFrameMs = now;
             try
             {
-                using var bitmap = SoftwareBitmap.CreateCopyFromSurfaceAsync(frame.Surface, BitmapAlphaMode.Premultiplied).AsTask().GetAwaiter().GetResult();
-                var (width, height) = (bitmap.PixelWidth, bitmap.PixelHeight);
-                if (width < 2 || height < 2) return;
-                var pixels = new byte[width * height * 4];
-                bitmap.CopyToBuffer(pixels.AsBuffer());
-                CheckBlack(pixels);
-                owner.Deliver(new Frame(pixels, width, height, width * 4));
+                var captured = staging.TryCopySurface(frame.Surface, size.Width, size.Height);
+                if (captured is null)
+                {
+                    using var bitmap = SoftwareBitmap.CreateCopyFromSurfaceAsync(frame.Surface, BitmapAlphaMode.Premultiplied).AsTask().GetAwaiter().GetResult();
+                    var (width, height) = (bitmap.PixelWidth, bitmap.PixelHeight);
+                    if (width < 2 || height < 2) return;
+                    var pixels = new byte[width * height * 4];
+                    bitmap.CopyToBuffer(pixels.AsBuffer());
+                    captured = new Frame(pixels, width, height, width * 4);
+                }
+                if (captured.Width < 2 || captured.Height < 2) return;
+                CheckBlack(captured.Pixels, now);
+                owner.Deliver(captured);
             }
             catch (Exception error)
             {
@@ -561,15 +572,16 @@ public sealed class RemotePlayWindowStream : IStreamSession
         }
 
         /// <summary>Bazı uygulamalar penceresinin yakalanmasını engeller; o zaman kareler simsiyah gelir.</summary>
-        private void CheckBlack(byte[] pixels)
+        private void CheckBlack(byte[] pixels, long nowMs)
         {
             var black = true;
             for (var i = 0; i < pixels.Length && black; i += 4 * 997)
                 black = pixels[i] < 10 && pixels[i + 1] < 10 && pixels[i + 2] < 10;
             if (black)
             {
-                var limit = seenContent ? BlackFramesAfterContentWarning : BlackFramesBeforeWarning;
-                if (++blackFrames == limit && !warnedBlack)
+                blackSinceMs ??= nowMs;
+                var limit = seenContent ? BlackMsAfterContentWarning : BlackMsBeforeWarning;
+                if (nowMs - blackSinceMs.Value >= limit && !warnedBlack)
                 {
                     warnedBlack = true;
                     RemotePlayLog.Note($"{Name} penceresi siyah geliyor: ekran yakalama engelleniyor olabilir");
@@ -579,7 +591,7 @@ public sealed class RemotePlayWindowStream : IStreamSession
             else
             {
                 seenContent = true;
-                blackFrames = 0;
+                blackSinceMs = null;
                 if (warnedBlack)
                 {
                     warnedBlack = false;
@@ -594,6 +606,7 @@ public sealed class RemotePlayWindowStream : IStreamSession
             disposed = true;
             try { session.Dispose(); } catch (Exception) { }
             try { pool.Dispose(); } catch (Exception) { }
+            try { staging.Dispose(); } catch (Exception) { }
             try { device.Dispose(); } catch (Exception) { }
         }
     }
@@ -621,10 +634,12 @@ public sealed class RemotePlayWindowStream : IStreamSession
         }
     }
 
-    /// <summary>Yakalama için Direct3D 11 aygıtı (WinRT IDirect3DDevice).</summary>
-    private static class Direct3D
+    /// <summary>Yakalama için Direct3D 11 aygıtı ve eşzamanlı staging okuyucu (WinRT async kopyası olmadan doğrudan Map).</summary>
+    internal static unsafe class Direct3D
     {
         private static readonly Guid DxgiDeviceIid = new("54ec77fa-1377-44e6-8c32-88fd5f44c84c");
+        private static readonly Guid DxgiInterfaceAccessIid = new("A9B3D012-3DF2-4EE3-B8D1-8695F457D3C1");
+        private static readonly Guid Texture2DIid = new("6f15aaf2-d208-4e89-9ab4-489535d34f9c");
 
         [DllImport("d3d11.dll", ExactSpelling = true)]
         private static extern int D3D11CreateDevice(IntPtr adapter, int driverType, IntPtr software, uint flags, IntPtr featureLevels,
@@ -634,7 +649,7 @@ public sealed class RemotePlayWindowStream : IStreamSession
         [DllImport("d3d11.dll", ExactSpelling = true)]
         private static extern int CreateDirect3D11DeviceFromDXGIDevice(IntPtr dxgiDevice, out IntPtr graphicsDevice);
 
-        public static IDirect3DDevice CreateDevice()
+        public static (IDirect3DDevice Device, StagingReader Staging) CreateDevice()
         {
             // D3D_DRIVER_TYPE_HARDWARE = 1, D3D11_CREATE_DEVICE_BGRA_SUPPORT = 0x20, D3D11_SDK_VERSION = 7
             Marshal.ThrowExceptionForHR(D3D11CreateDevice(IntPtr.Zero, 1, IntPtr.Zero, 0x20, IntPtr.Zero, 0, 7, out var device, out _, out var context));
@@ -645,15 +660,161 @@ public sealed class RemotePlayWindowStream : IStreamSession
                 try
                 {
                     Marshal.ThrowExceptionForHR(CreateDirect3D11DeviceFromDXGIDevice(dxgi, out var inspectable));
-                    try { return WinRT.MarshalInterface<IDirect3DDevice>.FromAbi(inspectable); }
+                    try
+                    {
+                        var winRt = WinRT.MarshalInterface<IDirect3DDevice>.FromAbi(inspectable);
+                        return (winRt, new StagingReader(device, context));
+                    }
                     finally { Marshal.Release(inspectable); }
                 }
                 finally { Marshal.Release(dxgi); }
             }
-            finally
+            catch
             {
                 if (context != IntPtr.Zero) Marshal.Release(context);
                 Marshal.Release(device);
+                throw;
+            }
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Texture2DDesc
+        {
+            public uint Width, Height, MipLevels, ArraySize, Format;
+            public uint SampleCount, SampleQuality;
+            public uint Usage, BindFlags, CPUAccessFlags, MiscFlags;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MappedSubresource
+        {
+            public IntPtr Data;
+            public uint RowPitch, DepthPitch;
+        }
+
+        internal sealed class StagingReader(IntPtr device, IntPtr context) : IDisposable
+        {
+            private const uint DxgiFormatB8G8R8A8Unorm = 87;
+            private const uint D3D11UsageStaging = 3;
+            private const uint D3D11CpuAccessRead = 0x20000;
+            private const uint D3D11MapRead = 1;
+
+            private IntPtr staging;
+            private int stagingWidth;
+            private int stagingHeight;
+            private bool fallbackOnly;
+            private bool disposed;
+
+            public Frame? TryCopySurface(IDirect3DSurface surface, int width, int height)
+            {
+                if (disposed || fallbackOnly || width < 2 || height < 2) return null;
+                IntPtr access = IntPtr.Zero;
+                IntPtr srcTex = IntPtr.Zero;
+                try
+                {
+                    using var marshaler = WinRT.MarshalInterface<IDirect3DSurface>.CreateMarshaler(surface);
+                    var surfacePtr = marshaler?.ThisPtr ?? IntPtr.Zero;
+                    if (surfacePtr == IntPtr.Zero) return null;
+                    var accessIid = DxgiInterfaceAccessIid;
+                    if (Marshal.QueryInterface(surfacePtr, in accessIid, out access) < 0 || access == IntPtr.Zero) return null;
+                    var texIid = Texture2DIid;
+                    var getInterface = (delegate* unmanaged[Stdcall]<IntPtr, Guid*, out IntPtr, int>)(*(IntPtr**)access)[3];
+                    if (getInterface(access, &texIid, out srcTex) < 0 || srcTex == IntPtr.Zero) return null;
+                    return CopyTexture(srcTex, width, height);
+                }
+                catch
+                {
+                    fallbackOnly = true;
+                    return null;
+                }
+                finally
+                {
+                    if (srcTex != IntPtr.Zero) Marshal.Release(srcTex);
+                    if (access != IntPtr.Zero) Marshal.Release(access);
+                }
+            }
+
+            internal Frame? CopyTexture(IntPtr srcTexture, int width, int height)
+            {
+                if (disposed || fallbackOnly || srcTexture == IntPtr.Zero || width < 2 || height < 2) return null;
+                if (!EnsureStaging(width, height))
+                {
+                    fallbackOnly = true;
+                    return null;
+                }
+                var ctxVtbl = *(IntPtr**)context;
+                // ID3D11DeviceContext::CopyResource (slot 47)
+                var copyResource = (delegate* unmanaged[Stdcall]<IntPtr, IntPtr, IntPtr, void>)ctxVtbl[47];
+                copyResource(context, staging, srcTexture);
+                // ID3D11DeviceContext::Map (slot 14) / Unmap (slot 15)
+                var map = (delegate* unmanaged[Stdcall]<IntPtr, IntPtr, uint, uint, uint, MappedSubresource*, int>)ctxVtbl[14];
+                MappedSubresource mapped;
+                if (map(context, staging, 0, D3D11MapRead, 0, &mapped) < 0 || mapped.Data == IntPtr.Zero) return null;
+                try
+                {
+                    var rowBytes = width * 4;
+                    var pixels = new byte[height * rowBytes];
+                    fixed (byte* dstBase = pixels)
+                    {
+                        var srcBase = (byte*)mapped.Data;
+                        if (mapped.RowPitch == rowBytes)
+                        {
+                            Buffer.MemoryCopy(srcBase, dstBase, pixels.Length, pixels.Length);
+                        }
+                        else
+                        {
+                            var srcPitch = (long)mapped.RowPitch;
+                            for (var y = 0; y < height; y++)
+                                Buffer.MemoryCopy(srcBase + (y * srcPitch), dstBase + ((long)y * rowBytes), rowBytes, rowBytes);
+                        }
+                    }
+                    return new Frame(pixels, width, height, rowBytes);
+                }
+                finally
+                {
+                    var unmap = (delegate* unmanaged[Stdcall]<IntPtr, IntPtr, uint, void>)ctxVtbl[15];
+                    unmap(context, staging, 0);
+                }
+            }
+
+            private bool EnsureStaging(int width, int height)
+            {
+                if (staging != IntPtr.Zero && stagingWidth == width && stagingHeight == height) return true;
+                if (staging != IntPtr.Zero)
+                {
+                    Marshal.Release(staging);
+                    staging = IntPtr.Zero;
+                }
+                var desc = new Texture2DDesc
+                {
+                    Width = (uint)width,
+                    Height = (uint)height,
+                    MipLevels = 1,
+                    ArraySize = 1,
+                    Format = DxgiFormatB8G8R8A8Unorm,
+                    SampleCount = 1,
+                    SampleQuality = 0,
+                    Usage = D3D11UsageStaging,
+                    BindFlags = 0,
+                    CPUAccessFlags = D3D11CpuAccessRead,
+                    MiscFlags = 0,
+                };
+                // ID3D11Device::CreateTexture2D (slot 5)
+                var createTex = (delegate* unmanaged[Stdcall]<IntPtr, Texture2DDesc*, IntPtr, out IntPtr, int>)(*(IntPtr**)device)[5];
+                if (createTex(device, &desc, IntPtr.Zero, out var created) < 0 || created == IntPtr.Zero) return false;
+                staging = created;
+                stagingWidth = width;
+                stagingHeight = height;
+                return true;
+            }
+
+            public void Dispose()
+            {
+                if (disposed) return;
+                disposed = true;
+                if (staging != IntPtr.Zero) { Marshal.Release(staging); staging = IntPtr.Zero; }
+                if (context != IntPtr.Zero) Marshal.Release(context);
+                if (device != IntPtr.Zero) Marshal.Release(device);
             }
         }
     }

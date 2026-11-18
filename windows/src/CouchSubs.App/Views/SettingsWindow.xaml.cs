@@ -94,6 +94,7 @@ public partial class SettingsWindow : Window
         CpuThreadChoice.SelectedItem = CpuThreadChoice.Items.Cast<ComboBoxItem>()
             .FirstOrDefault(item => (int)item.Tag == CpuThreadOptions.Normalize(settings.CpuTranslationThreads, Environment.ProcessorCount))
             ?? CpuThreadChoice.Items[0];
+        LowLatencyMode.IsChecked = settings.LowLatencyMode;
         FastSubtitleDetection.IsChecked = settings.FastSubtitleDetection;
         SelectByTag(OcrEngineChoice, settings.OcrEngine.ToString());
         ShowAdvancedOcr();
@@ -654,6 +655,9 @@ public partial class SettingsWindow : Window
                                       && CpuThreadOptions.NearCapacity(count, Environment.ProcessorCount)
             ? Visibility.Visible : Visibility.Collapsed;
     }
+
+    private void OnLowLatencyMode(object sender, RoutedEventArgs e) =>
+        Update(s => s with { LowLatencyMode = LowLatencyMode.IsChecked == true });
 
     private void OnFastSubtitleDetection(object sender, RoutedEventArgs e) =>
         Update(s => s with { FastSubtitleDetection = FastSubtitleDetection.IsChecked == true });

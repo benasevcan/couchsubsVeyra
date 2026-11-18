@@ -6,8 +6,9 @@ namespace CouchSubs.Core;
 
 /// <summary>Kare → bölge → yazı tanıma → kararlılık → çeviri → TV.</summary>
 /// <param name="clock">Milisaniye saati; testlerde sahtesi verilir.</param>
+/// <param name="lowLatency">Açıksa çöp olmayan temiz satırlar noktalama olmadan da ilk karede çeviriye gider.</param>
 public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator translator, ISubtitleSender sender,
-    ReadScheduler? scheduler = null, Func<long>? clock = null)
+    ReadScheduler? scheduler = null, Func<long>? clock = null, bool lowLatency = false)
 {
     /// <summary>
     /// Satır ekrandan bundan uzun süre önce kalktıysa geç gelen çevirisi gösterilmez (sonraki sahnenin üstüne düşmesin).
@@ -58,7 +59,8 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
     private readonly Func<long> now = clock ?? DefaultClock;
     /// <summary>Varsayılanı her kareyi okur; uygulama gereksiz okumaları atlayan planı verir.</summary>
     private readonly ReadScheduler schedule = scheduler ?? ReadScheduler.Always();
-    private readonly SubtitleStabilizer stabilizer = new(clock: clock ?? DefaultClock, cleanFastPathOnly: translator.Prefetches);
+    private readonly SubtitleStabilizer stabilizer = new(clock: clock ?? DefaultClock,
+        cleanFastPathOnly: translator.Prefetches, fastCleanImmediate: lowLatency);
     /// <summary>En son önceden çevirisi başlatılan okuma; aynı metin her karede yeniden istenmez.</summary>
     private string lastPrefetched = "";
     /// <summary>
@@ -258,9 +260,9 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
                     : $"çöp: {SubtitleLog.Excerpt(note.Text)} kararlı olmadan kalktı, gönderilmedi");
             }
             var box = reading.Box?.PlacedIn(area).CenteredOnScreen();
-            // Satır henüz doğrulanmadı: çevirisi şimdiden başlasın, doğrulanınca beklemeden gösterilsin.
+            // Satır henüz doğrulanmadı: çöp değilse çevirisi şimdiden başlasın, doğrulanınca beklemeden gösterilsin.
             if (action.Kind == StabilizerKind.None && translator.Prefetches && reading.Text.Trim() is { Length: >= 6 } early && early != lastPrefetched
-                && !(SkipsTurkish && TurkishText.IsSure(early)))
+                && !OcrNoise.LooksGarbled(early) && !(SkipsTurkish && TurkishText.IsSure(early)))
             {
                 lastPrefetched = early;
                 var earlyPrefix = SpeakerPrefix.Parse(early);

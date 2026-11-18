@@ -250,6 +250,8 @@ public sealed record UserSettings
     public int CpuTranslationThreads { get; init; } = CpuThreadOptions.Default;
     /// <summary>Değişmeyen altyazı bölgesinde tam OCR okumasını en fazla iki kare yeniden kullan.</summary>
     public bool FastSubtitleDetection { get; init; }
+    /// <summary>Düşük gecikme modu: 25 FPS pencere yakalama, hızlı OCR sınırı, 1. karede gösterim ve sıfır yarım-satır beklemesi.</summary>
+    public bool LowLatencyMode { get; init; } = true;
     /// <summary>Altyazı okuyucusu. Gelişmiş seçili ama modeli inmemişse Windows'unki kullanılır.</summary>
     public OcrEngine OcrEngine { get; init; } = OcrEngine.Windows;
     public DubbingSettings Dubbing { get; init; } = new();
@@ -575,6 +577,8 @@ public interface IAppServices
     bool RemotePlayInstalled(RemotePlayApp app) => true;
     /// <summary>Kullanıcının seçtiği taşınabilir Veyra yolunu pencere akışına bildirir.</summary>
     void SetVeyraPath(string? path) { }
+    /// <summary>Düşük gecikme modunu yakalama ve yazı tanıma servislerine bildirir.</summary>
+    void SetLowLatency(bool enabled) { }
     /// <param name="appConnected">TV uygulaması bilgisayara bağlı mı (Samsung'da bağlıyken TV'ye dokunulmaz).</param>
     /// <param name="onMoved">TV ağda yeni bir adreste bulununca çağrılır.</param>
     /// <param name="onKey">TV bağlantıda yeni jeton verdi (Samsung); saklanır.</param>

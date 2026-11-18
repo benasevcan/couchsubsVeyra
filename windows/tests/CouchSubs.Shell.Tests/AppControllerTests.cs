@@ -325,6 +325,8 @@ internal sealed class FakeServices : IAppServices
         return HasOcr ? new FakeReader(ReaderLines) : null;
     }
     public List<OcrEngine> ReaderEngines { get; } = [];
+    public List<bool> LowLatencyUpdates { get; } = [];
+    public void SetLowLatency(bool enabled) => LowLatencyUpdates.Add(enabled);
     public ITextReader? MakeReader(string language, OcrEngine engine)
     {
         ReaderEngines.Add(engine);

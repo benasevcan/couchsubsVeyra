@@ -168,6 +168,67 @@ public class PaddleOcrTests
         });
     }
 
+    [Fact]
+    public void Pooled_detection_and_recognition_match_single_shot_even_when_shrinking()
+    {
+        float[]? detScratch = null;
+        var large = Solid(1382, 378, 200);
+        var small = Solid(640, 180, 120);
+        var (detLarge, detLargeLen, detW1, detH1) = PaddleOcr.PrepareDetectionInto(large, 960, ref detScratch);
+        var expectedLarge = PaddleOcr.PrepareDetection(large, 960);
+        Assert.Equal((expectedLarge.Width, expectedLarge.Height), (detW1, detH1));
+        Assert.Equal(expectedLarge.Data, detLarge[..detLargeLen]);
+
+        var (detSmall, detSmallLen, detW2, detH2) = PaddleOcr.PrepareDetectionInto(small, 960, ref detScratch);
+        var expectedSmall = PaddleOcr.PrepareDetection(small, 960);
+        Assert.Equal((expectedSmall.Width, expectedSmall.Height), (detW2, detH2));
+        Assert.Equal(expectedSmall.Data, detSmall[..detSmallLen]);
+
+        float[]? recScratch = null;
+        var (recFirst, recFirstLen, wFirst) = PaddleOcr.PrepareRecognitionInto([Solid(400, 20, 255)], ref recScratch);
+        Assert.Equal(960, wFirst);
+        Assert.Equal(PaddleOcr.PrepareRecognition([Solid(400, 20, 255)]).Data, recFirst[..recFirstLen]);
+
+        // Küçülen sonraki satırda dolgu bölgesi (sağ kenar) sıfırlanmış kalmalıdır.
+        var (recSecond, recSecondLen, wSecond) = PaddleOcr.PrepareRecognitionInto([Solid(100, 48, 255)], ref recScratch);
+        Assert.Equal(320, wSecond);
+        Assert.Equal(PaddleOcr.PrepareRecognition([Solid(100, 48, 255)]).Data, recSecond[..recSecondLen]);
+    }
+
+    [Fact]
+    public void Vectorized_decode_handles_wide_dictionary_and_tie_breaking()
+    {
+        const int classes = 259;
+        var characters = Enumerable.Range(0, classes).Select(i => i == 0 ? "" : ((char)('a' + (i % 26))).ToString()).ToArray();
+        var steps = new float[classes * 3];
+        // İlk adım: 0.9 en yüksek değer iki sınıfta eşit (ilk gelen index 2 kazanmalı); 2. adım: tail 258; 3. adım: blank.
+        steps[2] = 0.9f;
+        steps[100] = 0.9f;
+        steps[classes + 258] = 0.75f;
+        steps[(2 * classes)] = 0.95f;
+        var (text, confidence) = PaddleOcr.Decode(steps, 3, characters);
+        Assert.Equal(characters[2] + characters[258], text);
+        Assert.Equal((0.9 + 0.75) / 2, confidence, 5);
+    }
+
+    [Fact]
+    public void Fixed_point_bilinear_resize_interpolates_gradients_accurately()
+    {
+        var frame = Frame.Blank(4, 2);
+        for (var y = 0; y < 2; y++)
+            for (var x = 0; x < 4; x++)
+            {
+                var i = (y * frame.Stride) + (x * 4);
+                var val = (byte)((x * 60) + (y * 30));
+                frame.Pixels[i] = frame.Pixels[i + 1] = frame.Pixels[i + 2] = val;
+                frame.Pixels[i + 3] = 255;
+            }
+        var resized = frame.Resized(8, 4);
+        Assert.Equal((8, 4), (resized.Width, resized.Height));
+        Assert.True(resized.Pixels[0] <= resized.Pixels[7 * 4]);
+        Assert.True(resized.Pixels[0] < resized.Pixels[3 * resized.Stride]);
+    }
+
     private static Frame Solid(int width, int height, byte value)
     {
         var frame = Frame.Blank(width, height);

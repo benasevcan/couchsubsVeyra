@@ -88,6 +88,8 @@ public sealed class PaddleOcrReader : ITextReader
     private sealed class Engine(InferenceSession detection, InferenceSession recognition, string[] characters, string device) : IDisposable
     {
         private bool disposed;
+        private float[]? detectionScratch;
+        private float[]? recognitionScratch;
 
         public string Device { get; } = device;
 
@@ -149,13 +151,14 @@ public sealed class PaddleOcrReader : ITextReader
         public Reading Read(Frame image)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
-            var input = PaddleOcr.PrepareDetection(image, PaddleOcr.DetectionLimitFor(image.Width, image.Height));
+            var (detData, detLength, detWidth, detHeight) = PaddleOcr.PrepareDetectionInto(
+                image, PaddleOcr.DetectionLimitFor(image.Width, image.Height), ref detectionScratch);
             List<PaddleOcr.Box> boxes;
             using (var results = detection.Run([NamedOnnxValue.CreateFromTensor(detection.InputNames[0],
-                       new DenseTensor<float>(input.Data, [1, 3, input.Height, input.Width]))]))
+                       new DenseTensor<float>(detData.AsMemory(0, detLength), [1, 3, detHeight, detWidth]))]))
             {
                 var map = results[0].AsTensor<float>();
-                boxes = PaddleOcr.FindBoxes(((DenseTensor<float>)map).Buffer.Span, input.Width, input.Height, image.Width, image.Height);
+                boxes = PaddleOcr.FindBoxes(((DenseTensor<float>)map).Buffer.Span, detWidth, detHeight, image.Width, image.Height);
             }
             if (boxes.Count == 0) return Reading.Empty;
 
@@ -166,9 +169,9 @@ public sealed class PaddleOcrReader : ITextReader
             for (var start = 0; start < order.Count; start += PaddleOcr.RecognitionBatch)
             {
                 var batch = order.Skip(start).Take(PaddleOcr.RecognitionBatch).ToList();
-                var (data, width) = PaddleOcr.PrepareRecognition(batch.Select(i => crops[i]).ToList());
+                var (recData, recLength, width) = PaddleOcr.PrepareRecognitionInto(batch.Select(i => crops[i]).ToList(), ref recognitionScratch);
                 using var results = recognition.Run([NamedOnnxValue.CreateFromTensor(recognition.InputNames[0],
-                    new DenseTensor<float>(data, [batch.Count, 3, PaddleOcr.RecognitionHeight, width]))]);
+                    new DenseTensor<float>(recData.AsMemory(0, recLength), [batch.Count, 3, PaddleOcr.RecognitionHeight, width]))]);
                 var output = (DenseTensor<float>)results[0].AsTensor<float>();
                 int steps = output.Dimensions[1], classes = output.Dimensions[2];
                 if (classes != characters.Length) throw new InvalidDataException($"model has {classes} classes, dictionary {characters.Length}");

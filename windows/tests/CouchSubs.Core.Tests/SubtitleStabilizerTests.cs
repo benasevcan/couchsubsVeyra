@@ -429,6 +429,18 @@ public class SubtitleStabilizerTests
         Assert.Equal(StabilizerAction.Translate(correct), s.Feed(correct));
         Assert.Equal(StabilizerAction.None, s.Feed(correct));
     }
+
+    [Fact]
+    public void FastCleanImmediateSendsCleanUnpunctuatedLineOnFirstFrameButStillHoldsJunk()
+    {
+        var clock = new TestClock();
+        var s = new SubtitleStabilizer(clock: clock.Read, cleanFastPathOnly: true, fastCleanImmediate: true);
+        // Temiz satır noktalama olmadan da ilk karede çevrilir.
+        Assert.Equal(StabilizerAction.Translate("Follow Trevor to the car"), s.Feed("Follow Trevor to the car"));
+        // Çöp veya kirli başlangıç okuması yine doğrulanmayı bekler.
+        Assert.Equal(StabilizerAction.None, s.Feed("f fe & ie want it"));
+        Assert.Equal(StabilizerAction.Translate("I know you want it"), s.Feed("I know you want it"));
+    }
 }
 
 internal sealed class TestClock

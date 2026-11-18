@@ -305,6 +305,10 @@
                                 </StackPanel>
                                 <TextBlock x:Name="AdvancedOcrError" Foreground="{DynamicResource dangerBrush}" TextWrapping="Wrap" Margin="0,8,0,0" Visibility="Collapsed" />
                             </StackPanel>
+                            <CheckBox x:Name="LowLatencyMode" Content="{t:T 'Low-latency mode'}"
+                                      Checked="OnLowLatencyMode" Unchecked="OnLowLatencyMode" />
+                            <TextBlock Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,6,0,12"
+                                       Text="{t:T 'Captures at 25 FPS with Direct3D, shows clean subtitles on the first frame without waiting, and trims partial-line waits.'}" />
                             <CheckBox x:Name="FastSubtitleDetection" Content="{t:T 'Check unchanged subtitle areas more often'}"
                                       Checked="OnFastSubtitleDetection" Unchecked="OnFastSubtitleDetection" />
                             <TextBlock Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,6,0,16"

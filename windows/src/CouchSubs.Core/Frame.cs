@@ -66,29 +66,45 @@ public sealed class Frame(byte[] pixels, int width, int height, int stride)
     }
 
     /// <summary>İki doğrusal büyütme ya da küçültme, kesirli oranla (OpenCV'nin INTER_LINEAR'ı gibi piksel ortalarından).</summary>
-    public Frame Resized(int width, int height)
+    public unsafe Frame Resized(int width, int height)
     {
         var result = Blank(width, height);
+        if (width <= 0 || height <= 0 || Width <= 0 || Height <= 0) return result;
+        const int shift = 11;
+        const int scale = 1 << shift;
         double scaleX = (double)Width / width, scaleY = (double)Height / height;
-        for (var ty = 0; ty < height; ty++)
+        var x0 = width <= 2048 ? stackalloc int[width] : new int[width];
+        var x1 = width <= 2048 ? stackalloc int[width] : new int[width];
+        var wx = width <= 2048 ? stackalloc int[width] : new int[width];
+        for (var tx = 0; tx < width; tx++)
         {
-            var sy = Math.Clamp(((ty + 0.5) * scaleY) - 0.5, 0, Height - 1.0);
-            var y0 = (int)sy;
-            var y1 = Math.Min(y0 + 1, Height - 1);
-            var fy = sy - y0;
-            for (var tx = 0; tx < width; tx++)
+            var sx = Math.Clamp(((tx + 0.5) * scaleX) - 0.5, 0, Width - 1.0);
+            var ix0 = (int)sx;
+            x0[tx] = ix0 * 4;
+            x1[tx] = Math.Min(ix0 + 1, Width - 1) * 4;
+            wx[tx] = (int)Math.Round((sx - ix0) * scale);
+        }
+        fixed (byte* srcBase = Pixels, dstBase = result.Pixels)
+        {
+            for (var ty = 0; ty < height; ty++)
             {
-                var sx = Math.Clamp(((tx + 0.5) * scaleX) - 0.5, 0, Width - 1.0);
-                var x0 = (int)sx;
-                var x1 = Math.Min(x0 + 1, Width - 1);
-                var fx = sx - x0;
-                int a = (y0 * Stride) + (x0 * 4), b = (y0 * Stride) + (x1 * 4), c = (y1 * Stride) + (x0 * 4), d = (y1 * Stride) + (x1 * 4);
-                var o = (ty * result.Stride) + (tx * 4);
-                for (var k = 0; k < 4; k++)
+                var sy = Math.Clamp(((ty + 0.5) * scaleY) - 0.5, 0, Height - 1.0);
+                var iy0 = (int)sy;
+                var iy1 = Math.Min(iy0 + 1, Height - 1);
+                var wy = (int)Math.Round((sy - iy0) * scale);
+                var row0 = srcBase + (iy0 * Stride);
+                var row1 = srcBase + (iy1 * Stride);
+                var dst = dstBase + (ty * result.Stride);
+                for (var tx = 0; tx < width; tx++)
                 {
-                    var top = Pixels[a + k] + ((Pixels[b + k] - Pixels[a + k]) * fx);
-                    var bottom = Pixels[c + k] + ((Pixels[d + k] - Pixels[c + k]) * fx);
-                    result.Pixels[o + k] = (byte)Math.Round(top + ((bottom - top) * fy));
+                    int a = x0[tx], b = x1[tx], f = wx[tx];
+                    var o = tx * 4;
+                    for (var k = 0; k < 4; k++)
+                    {
+                        var top = (row0[a + k] << shift) + ((row0[b + k] - row0[a + k]) * f);
+                        var bottom = (row1[a + k] << shift) + ((row1[b + k] - row1[a + k]) * f);
+                        dst[o + k] = (byte)Math.Clamp(((top << shift) + ((bottom - top) * wy) + (1 << (2 * shift - 1))) >> (2 * shift), 0, 255);
+                    }
                 }
             }
         }
@@ -163,18 +179,24 @@ public static class RegionCropper
     }
 
     /// <summary>Bölgenin küçültülmüş gri kopyası: iki kareyi yazı tanımaya gerek kalmadan karşılaştırmaya yeter.</summary>
-    public static byte[] Signature(Frame image)
+    public static unsafe byte[] Signature(Frame image)
     {
         const int width = ReadScheduler.SignatureWidth, height = ReadScheduler.SignatureHeight;
         var samples = new byte[width * height];
         if (image.Width == 0 || image.Height == 0) return samples;
-        for (var y = 0; y < height; y++)
+        var xOffsets = stackalloc int[width];
+        for (var x = 0; x < width; x++) xOffsets[x] = (x * image.Width / width) * 4;
+        fixed (byte* srcBase = image.Pixels, dstBase = samples)
         {
-            var row = (y * image.Height / height) * image.Stride;
-            for (var x = 0; x < width; x++)
+            for (var y = 0; y < height; y++)
             {
-                var pixel = row + (x * image.Width / width) * 4;
-                samples[y * width + x] = (byte)((image.Pixels[pixel] + image.Pixels[pixel + 1] * 2 + image.Pixels[pixel + 2]) / 4);
+                var row = srcBase + ((y * image.Height / height) * image.Stride);
+                var dst = dstBase + (y * width);
+                for (var x = 0; x < width; x++)
+                {
+                    var p = row + xOffsets[x];
+                    dst[x] = (byte)((p[0] + (p[1] * 2) + p[2]) >> 2);
+                }
             }
         }
         return samples;
