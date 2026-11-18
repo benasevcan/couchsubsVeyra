@@ -149,7 +149,7 @@ public sealed partial class SubtitleOverlayWindow : Window
         {
             case SubtitleEventKind.Subtitle:
                 screenUntil = 0;
-                stack.Show(e.Text, e.DurationMs, e.Paragraphs, Now, e.Replaces);
+                stack.Show(e.Text, e.DurationMs, e.Paragraphs, Now, e.Replaces, e.Box);
                 break;
             // "Ekranı çevir": çeviriler satır satır gösterilir. Hemen ardından gelen "temizle" ("Ekran çevriliyor…"
             // yazısı için) onları kaldırmaz; yeniden basmak (ScreenClear) ya da yeni altyazı kaldırır.
@@ -223,6 +223,8 @@ public sealed partial class SubtitleOverlayWindow : Window
     {
         var now = Now;
         var lines = stack.Lines(now).ToList();
+        var activeBox = lines.FirstOrDefault(l => l.Role == SubtitleStack.Role.Current)?.Box;
+        var cover = PlaceFromSettings(activeBox);
         var adjusting = controller.OverlayAdjusting;
         if (lines.Count == 0 && adjusting)
             lines.Add(new SubtitleStack.Line(0, Localizer.Current["Subtitles appear here."], SubtitleStack.Role.Current, false, false));
@@ -234,8 +236,13 @@ public sealed partial class SubtitleOverlayWindow : Window
         {
             if (!boxes.TryGetValue(line.Id, out var box))
             {
-                box = MakeBox(line);
+                box = MakeBox(line, cover);
                 boxes[line.Id] = box;
+            }
+            if (line.Role == SubtitleStack.Role.Current)
+            {
+                box.MinWidth = cover.MinBoxWidth;
+                box.MinHeight = cover.MinBoxHeight;
             }
             if (line.Fading && box.Tag is not "fading")
             {
@@ -263,7 +270,7 @@ public sealed partial class SubtitleOverlayWindow : Window
     }
 
     /// <summary>TV'deki altyazı kutusunun aynısı: siyah yarı saydam zemin, beyaz ya da sarı yarı kalın yazı, üst satırlar soluk.</summary>
-    private Border MakeBox(SubtitleStack.Line line)
+    private Border MakeBox(SubtitleStack.Line line, OverlayPlacement.CoverLayout cover)
     {
         var style = controller.Settings.Style;
         var scale = Scale;
@@ -285,6 +292,7 @@ public sealed partial class SubtitleOverlayWindow : Window
             Foreground = SubtitleStyleVisuals.ResolveTextBrush(style),
             TextWrapping = TextWrapping.Wrap,
             TextAlignment = line.Paragraphs ? TextAlignment.Left : SubtitleStyleVisuals.ResolveTextAlignment(style.HorizontalAlign),
+            VerticalAlignment = VerticalAlignment.Center,
             LineHeight = size * SubtitleStyleVisuals.ResolveLineHeightFactor(style.LineSpacing),
             Effect = SubtitleStyleVisuals.ResolveShadowEffect(style.ShadowStrength, scale),
         };
@@ -297,6 +305,8 @@ public sealed partial class SubtitleOverlayWindow : Window
             CornerRadius = new CornerRadius(SubtitleStyleVisuals.ResolveCornerRadius(style, band, scale)),
             Padding = SubtitleStyleVisuals.ResolveBoxPadding(style.BoxPadding, current, scale),
             Margin = new Thickness(band ? -24 * scale : 0, 7 * scale, band ? -24 * scale : 0, 7 * scale),
+            MinWidth = current ? cover.MinBoxWidth : 0,
+            MinHeight = current ? cover.MinBoxHeight : 0,
             HorizontalAlignment = band ? HorizontalAlignment.Stretch : SubtitleStyleVisuals.ResolveHorizontalAlignment(style.HorizontalAlign),
             Opacity = line.Role switch { SubtitleStack.Role.Current => 1, SubtitleStack.Role.Previous => 0.6, _ => 0.45 },
             Child = text,
@@ -415,24 +425,38 @@ public sealed partial class SubtitleOverlayWindow : Window
 
     /// <summary>
     /// Kullanıcı fareyle taşıdıysa kayıtlı konum korunur; ayar penceresinden Altta/Üstte ya da konum kaydırıcısı
-    /// kullanıldıysa çalışma alanı üzerinden hesaplanan yerleşim uygulanır.
+    /// kullanıldıysa çalışma alanı üzerinden hesaplanan yerleşim uygulanır. Kaynak İngilizce satır kutuyu taşıyorsa
+    /// pencere ve arka plan kutusu İngilizce yazıyı tamamen kapatacak kadar genişletilir.
     /// </summary>
-    private void PlaceFromSettings()
+    private OverlayPlacement.CoverLayout PlaceFromSettings(CouchSubs.Core.TextBox? sourceBox = null)
     {
         var style = controller.Settings.Style;
-        var height = OverlayPlacement.Height(style.FontSize, Scale);
+        var scale = Scale;
+        var height = OverlayPlacement.Height(style.FontSize, scale);
         var work = SystemParameters.WorkArea;
         var workArea = new ScreenArea(work.Left, work.Top, work.Width, work.Height);
-        var place = controller.Settings.Overlay is { } saved
+        var basePlace = controller.Settings.Overlay is { } saved
             ? OverlayPlacement.Place(saved,
                 new ScreenArea(SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenTop,
                     SystemParameters.VirtualScreenWidth, SystemParameters.VirtualScreenHeight),
                 workArea, height)
             : OverlayPlacement.AnchoredPlace(workArea, height, style.PositionAnchor, style.BottomPercent, style.BoxWidthPercent, style.HorizontalAlign);
-        Height = height;
-        Width = place.Width;
-        Left = place.Left;
-        Top = place.Top;
+        var cover = OverlayPlacement.CoverForSource(
+            workArea,
+            Math.Max(work.Height, SystemParameters.PrimaryScreenHeight),
+            basePlace,
+            height,
+            sourceBox,
+            style.HorizontalAlign,
+            style.BackgroundShape == SubtitleBackgroundShape.Band,
+            style.Background > 0,
+            controller.OverlayAdjusting,
+            24 * scale);
+        if (Math.Abs(Height - height) >= 1) Height = height;
+        if (Math.Abs(Width - cover.Window.Width) >= 1) Width = cover.Window.Width;
+        if (Math.Abs(Left - cover.Window.Left) >= 1) Left = cover.Window.Left;
+        if (Math.Abs(Top - cover.Window.Top) >= 1) Top = cover.Window.Top;
+        return cover;
     }
 
     /// <summary>NaN ya da sonsuz değer JSON'a yazılamaz (ayar kaydı hata verirdi); öyleyse kaydedilmez.</summary>

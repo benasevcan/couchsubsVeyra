@@ -82,6 +82,64 @@ public static class OverlayPlacement
         return new OverlayBounds(Math.Round(left), Math.Round(top), Math.Round(width));
     }
 
+    /// <summary>Kaynak İngilizce altyazı kutusunu tamamen örtecek pencere konumu ve kutu en az boyutları.</summary>
+    public readonly record struct CoverLayout(OverlayBounds Window, double MinBoxWidth, double MinBoxHeight);
+
+    /// <summary>
+    /// Oyundaki İngilizce altyazının yanlarından veya altından taşmasını önlemek için kaplama penceresini ve kutu
+    /// minimum boyutlarını hesaplar; kullanıcı pencereyi ayarlıyorsa ya da zemin saydamsa temel konuma dokunmaz.
+    /// </summary>
+    public static CoverLayout CoverForSource(
+        ScreenArea workArea,
+        double screenHeight,
+        OverlayBounds baseWindow,
+        double windowHeight,
+        TextBox? sourceBox,
+        SubtitleHorizontalAlign horizontalAlign,
+        bool isBand,
+        bool hasBackground,
+        bool adjusting,
+        double sidePadding)
+    {
+        var work = workArea.IsUsable ? workArea : Fallback;
+        if (!hasBackground || adjusting) return new CoverLayout(baseWindow, 0, 0);
+        var fullH = double.IsFinite(screenHeight) && screenHeight > 0 ? screenHeight : work.Height;
+        var coverHeight = sourceBox is { } s ? Math.Clamp(s.Bottom - s.Top + 0.016, 0, 0.35) * fullH : 0;
+        if (isBand) return new CoverLayout(new OverlayBounds(work.Left, baseWindow.Top, work.Width), 0, Math.Round(coverHeight));
+        if (sourceBox is not { } box) return new CoverLayout(baseWindow, 0, 0);
+
+        var sourceY = ((box.Top + box.Bottom) / 2.0) * fullH;
+        if (sourceY < baseWindow.Top - 40 || sourceY > baseWindow.Top + windowHeight + 90)
+            return new CoverLayout(baseWindow, 0, 0);
+
+        var leftFrac = Math.Clamp(box.Left - 0.02, 0, 1);
+        var rightFrac = Math.Clamp(box.Right + 0.02, leftFrac, 1);
+        var coverLeft = work.Left + leftFrac * work.Width;
+        var coverRight = work.Left + rightFrac * work.Width;
+        var coverWidth = Math.Max(0, coverRight - coverLeft);
+        var pad = Math.Max(0, sidePadding);
+        var newLeft = Math.Round(Math.Max(work.Left, Math.Min(baseWindow.Left, coverLeft - pad)));
+        var newRight = Math.Round(Math.Min(work.Right, Math.Max(baseWindow.Left + baseWindow.Width, coverRight + pad)));
+        var window = new OverlayBounds(newLeft, baseWindow.Top, Math.Max(SmallestWidth, newRight - newLeft));
+
+        var innerLeft = window.Left + pad;
+        var innerRight = window.Left + window.Width - pad;
+        var innerWidth = Math.Max(0, innerRight - innerLeft);
+        var middle = (box.Left + box.Right) / 2.0;
+        double minBoxWidth;
+        if (horizontalAlign == SubtitleHorizontalAlign.Center && middle is >= 0.25 and <= 0.75)
+        {
+            var panelMid = (innerLeft + innerRight) / 2.0;
+            var reach = Math.Max(panelMid - coverLeft, coverRight - panelMid);
+            minBoxWidth = Math.Min(innerWidth, Math.Max(coverWidth, 2 * reach));
+        }
+        else
+        {
+            minBoxWidth = Math.Min(innerWidth, coverWidth);
+        }
+        return new CoverLayout(window, Math.Round(minBoxWidth), Math.Round(coverHeight));
+    }
+
     /// <summary>Kenardan genişletilen pencerenin yeni genişliği: en az <see cref="SmallestWidth"/>, en çok tüm ekranlar.</summary>
     public static double ClampWidth(double width, double virtualScreenWidth)
     {

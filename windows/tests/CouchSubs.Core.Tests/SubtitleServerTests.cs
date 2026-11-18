@@ -166,6 +166,17 @@ public class SubtitleServerTests
         Assert.Equal([new SubtitleEvent(SubtitleEventKind.Subtitle, "Merhaba", 4000, true), SubtitleEvent.Cleared], received);
     }
 
+    [Fact]
+    public void LocalListenerGetsSourceBox()
+    {
+        using var server = new SubtitleServer(0);
+        var received = new List<SubtitleEvent>();
+        server.EventSent += received.Add;
+        var box = new TextBox(0.18, 0.85, 0.82, 0.90);
+        server.SendSubtitle("Merhaba", 4000, box);
+        Assert.Equal([new SubtitleEvent(SubtitleEventKind.Subtitle, "Merhaba", 4000, Box: box)], received);
+    }
+
     /// <summary>"Ekranı çevir" sonuçları da pencereye gider: altyazı yalnız bilgisayardayken (TV yok) hiçbir yerde görünmüyordu.</summary>
     [Fact]
     public void LocalListenerGetsScreenTranslations()

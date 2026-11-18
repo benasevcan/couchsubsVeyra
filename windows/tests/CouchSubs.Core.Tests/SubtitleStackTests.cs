@@ -202,4 +202,21 @@ public class SubtitleStackTests
         Assert.True(stack.Lines(2.6)[1].Fading);
         Assert.Equal(["İkinci"], Texts(stack, 2.9));
     }
+
+    [Fact]
+    public void CurrentLineCarriesSourceBoxAcrossRevisions()
+    {
+        var stack = new SubtitleStack();
+        var box = new TextBox(0.2, 0.85, 0.8, 0.90);
+        stack.Show("Bir", 8000, false, 0, box: box);
+        stack.Show("Birinci tam cümle", 8000, false, 0.3, replaces: true);
+        Assert.Equal(box, stack.Lines(0.3)[0].Box);
+
+        // Yeni satır gelince önceki satırda eski kutu kalmaz; yeni satır kendi kutusunu taşır.
+        var nextBox = new TextBox(0.3, 0.86, 0.7, 0.90);
+        stack.Show("İkinci", 8000, false, 0.8, box: nextBox);
+        var lines = stack.Lines(0.8);
+        Assert.Null(lines[0].Box);
+        Assert.Equal(nextBox, lines[1].Box);
+    }
 }

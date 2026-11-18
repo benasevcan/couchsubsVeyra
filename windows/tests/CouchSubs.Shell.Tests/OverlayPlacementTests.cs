@@ -131,4 +131,53 @@ public class OverlayPlacementTests
         Assert.Equal(Math.Round(1920 * 0.30), clamped.Width);
         Assert.Equal(Math.Round(1032 * 0.45), clamped.Top);
     }
+
+    [Fact]
+    public void CoverForSourceWidensWindowAndSetsMinSizeForWideAndAsymmetricLines()
+    {
+        var baseWin = OverlayPlacement.AnchoredPlace(Work, Height, CouchSubs.Core.SubtitleAnchor.Bottom, 4, 70, CouchSubs.Core.SubtitleHorizontalAlign.Center);
+        // %10..%90 arası çok geniş tek satır İngilizce altyazı (+%2 yan paylarla) 70% pencereden büyüktür.
+        var wide = OverlayPlacement.CoverForSource(
+            Work, 1080, baseWin, Height,
+            new CouchSubs.Core.TextBox(0.10, 0.86, 0.90, 0.90),
+            CouchSubs.Core.SubtitleHorizontalAlign.Center,
+            isBand: false, hasBackground: true, adjusting: false, sidePadding: 24);
+        Assert.True(wide.Window.Width > baseWin.Width);
+        Assert.True(wide.MinBoxWidth >= Math.Round((0.90 - 0.10 + 0.04) * Work.Width) - 1);
+        Assert.True(wide.MinBoxHeight >= Math.Round((0.90 - 0.86 + 0.016) * 1080) - 1);
+
+        // Sol tarafa hafif kayık orta satır: MinBoxWidth hem sol (%18-%2=%16) hem sağ (%72+%2=%74) kenarı kapsar.
+        var shifted = OverlayPlacement.CoverForSource(
+            Work, 1080, baseWin, Height,
+            new CouchSubs.Core.TextBox(0.18, 0.86, 0.72, 0.90),
+            CouchSubs.Core.SubtitleHorizontalAlign.Center,
+            isBand: false, hasBackground: true, adjusting: false, sidePadding: 24);
+        var center = shifted.Window.Left + shifted.Window.Width / 2.0;
+        var boxLeft = center - shifted.MinBoxWidth / 2.0;
+        var boxRight = center + shifted.MinBoxWidth / 2.0;
+        Assert.True(boxLeft <= (0.18 - 0.02) * Work.Width + 1);
+        Assert.True(boxRight >= (0.72 + 0.02) * Work.Width - 1);
+    }
+
+    [Fact]
+    public void CoverForSourceLeavesTopOverlayUnstretchedAndStretchesBand()
+    {
+        var topWin = OverlayPlacement.AnchoredPlace(Work, Height, CouchSubs.Core.SubtitleAnchor.Top, 4, 50, CouchSubs.Core.SubtitleHorizontalAlign.Center);
+        var topResult = OverlayPlacement.CoverForSource(
+            Work, 1080, topWin, Height,
+            new CouchSubs.Core.TextBox(0.15, 0.86, 0.85, 0.90),
+            CouchSubs.Core.SubtitleHorizontalAlign.Center,
+            isBand: false, hasBackground: true, adjusting: false, sidePadding: 24);
+        Assert.Equal(topWin, topResult.Window);
+        Assert.Equal(0, topResult.MinBoxWidth);
+
+        var bottomWin = OverlayPlacement.AnchoredPlace(Work, Height, CouchSubs.Core.SubtitleAnchor.Bottom, 4, 70, CouchSubs.Core.SubtitleHorizontalAlign.Center);
+        var band = OverlayPlacement.CoverForSource(
+            Work, 1080, bottomWin, Height,
+            new CouchSubs.Core.TextBox(0.20, 0.86, 0.80, 0.90),
+            CouchSubs.Core.SubtitleHorizontalAlign.Center,
+            isBand: true, hasBackground: true, adjusting: false, sidePadding: 24);
+        Assert.Equal(Work.Left, band.Window.Left);
+        Assert.Equal(Work.Width, band.Window.Width);
+    }
 }

@@ -284,7 +284,7 @@ public sealed class SubtitleServer(int port = 8787, TimeSpan? pingInterval = nul
         if (replaces) json["replace"] = true;
         if (box is { } b) json["box"] = BoxJson(b);
         Broadcast(Frame("subtitle", json), subtitle: true);
-        EventSent?.Invoke(new SubtitleEvent(SubtitleEventKind.Subtitle, text, durationMs, paragraphs, replaces));
+        EventSent?.Invoke(new SubtitleEvent(SubtitleEventKind.Subtitle, text, durationMs, paragraphs, replaces, Box: box));
     }
 
     /// <summary>Dört basamağa yuvarlanır (decimal: JSON'da 0.8 olarak yazılsın).</summary>

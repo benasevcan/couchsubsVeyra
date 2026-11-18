@@ -349,7 +349,8 @@
       line.style.maxWidth = band ? '100vw' : '';
       line.style.top = ((box.top + box.bottom) / 2 * 100) + '%';
       // Bant: zemin sayfanın tüm genişliğini kaplar (eski sürümler alanı göndermez, yazı kadar kalır).
-      line.style.minWidth = band ? '100vw' : ((box.right - box.left) * 100) + 'vw';
+      line.style.minWidth = band ? '100vw' : Math.min(100, (box.right - box.left + 0.04) * 100) + 'vw';
+      line.style.minHeight = band ? '' : Math.min(35, (box.bottom - box.top + 0.016) * 100) + 'vh';
       // Örtü de "Arka plan koyuluğu"na uyar (eskiden hep %97'ydi, kaydırıcı örtüde işe yaramıyordu); %100 tamamen
       // opaktır. Koyuluğu göndermeyen eski sürümlerde örtü %97 kalır.
       var bg = fixed.bg !== null ? Number(fixed.bg) : (lastStyle && lastStyle.background);
@@ -363,6 +364,7 @@
       line.style.left = '';
       line.style.top = '';
       line.style.minWidth = '';
+      line.style.minHeight = '';
       line.style.maxWidth = '';
       line.className = 'on';
       apply(lastStyle);

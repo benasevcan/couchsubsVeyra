@@ -149,7 +149,7 @@ public sealed class StreamWindow : Window
         {
             case SubtitleEventKind.Subtitle:
                 screenUntil = 0;
-                stack.Show(e.Text, e.DurationMs, e.Paragraphs, Now, e.Replaces);
+                stack.Show(e.Text, e.DurationMs, e.Paragraphs, Now, e.Replaces, e.Box);
                 break;
             case SubtitleEventKind.Screen:
                 stack.Show(e.Text, e.DurationMs, paragraphs: true, Now);
@@ -237,9 +237,18 @@ public sealed class StreamWindow : Window
             Foreground = SubtitleStyleVisuals.ResolveTextBrush(style, boxed ? dim : 1.0),
             TextWrapping = TextWrapping.Wrap,
             TextAlignment = line.Paragraphs ? TextAlignment.Left : SubtitleStyleVisuals.ResolveTextAlignment(style.HorizontalAlign),
+            VerticalAlignment = VerticalAlignment.Center,
             LineHeight = size * SubtitleStyleVisuals.ResolveLineHeightFactor(style.LineSpacing),
             Effect = boxed ? null : SubtitleStyleVisuals.ResolveShadowEffect(style.ShadowStrength, scale),
         };
+        var hostW = linesHost.ActualWidth > 0 ? linesHost.ActualWidth : 1280;
+        var hostH = linesHost.ActualHeight > 0 ? linesHost.ActualHeight : 720;
+        var minW = boxed && !band && current && line.Box is { } s
+            ? Math.Round(Math.Min(Math.Max(0, hostW - 48 * scale), Math.Clamp(s.Right - s.Left + 0.04, 0, 1) * hostW))
+            : 0;
+        var minH = boxed && current && line.Box is { } sh
+            ? Math.Round(Math.Clamp(sh.Bottom - sh.Top + 0.016, 0, 0.35) * hostH)
+            : 0;
         var (borderBrush, borderThickness) = SubtitleStyleVisuals.ResolveBorder(style.BorderStyle, scale);
         return new Border
         {
@@ -251,6 +260,8 @@ public sealed class StreamWindow : Window
             CornerRadius = new CornerRadius(SubtitleStyleVisuals.ResolveCornerRadius(style, band, scale)),
             Padding = SubtitleStyleVisuals.ResolveBoxPadding(style.BoxPadding, current, scale),
             Margin = new Thickness(band ? -24 * scale : 0, 7 * scale, band ? -24 * scale : 0, 7 * scale),
+            MinWidth = minW,
+            MinHeight = minH,
             HorizontalAlignment = band ? HorizontalAlignment.Stretch : SubtitleStyleVisuals.ResolveHorizontalAlignment(style.HorizontalAlign),
             Child = text,
         };

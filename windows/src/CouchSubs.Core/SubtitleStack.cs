@@ -25,14 +25,15 @@ public sealed class SubtitleStack
 
     /// <param name="Paragraphs">Başlık ve maddeli yazılar (görev paneli gibi) satır satır, sola yaslı gösterilir.</param>
     /// <param name="Fading">Üstteki satır solarak kalkıyor.</param>
-    public sealed record Line(int Id, string Text, Role Role, bool Paragraphs, bool Fading)
+    /// <param name="Box">Oyundaki İngilizce altyazının ekrandaki normalize konumu (0–1); varsa masaüstü kaplama kutusu bu alanı örter.</param>
+    public sealed record Line(int Id, string Text, Role Role, bool Paragraphs, bool Fading, TextBox? Box = null)
     {
         /// <summary>Görünümde kullanılacak metin ve yazı boyu çarpanı: uzun çeviri en çok 3 satıra dengeli bölünür
         /// (bkz. <see cref="SubtitleWrap"/>). Görev paneli gibi satır satır yazılar olduğu gibi kalır.</summary>
         public SubtitleWrap.Result Wrapped => Paragraphs ? new SubtitleWrap.Result(Text, 1) : SubtitleWrap.Fit(Text);
     }
 
-    private sealed record Current(int Id, string Text, bool Paragraphs, double ShownAt, double HideAt, double HoldUntil);
+    private sealed record Current(int Id, string Text, bool Paragraphs, double ShownAt, double HideAt, double HoldUntil, TextBox? Box = null);
 
     private sealed record Slot(int Id, string Text, double ShownAt)
     {
@@ -55,9 +56,11 @@ public sealed class SubtitleStack
 
     /// <summary>Yeni altyazı. <paramref name="durationMs"/>: bilgisayarın bildirdiği süre (0 ya da eksi ise yazının uzunluğundan hesaplanır).</summary>
     /// <param name="replaces">Bilgisayar bu satırı öncekinin uzamış ya da düzelmiş okuması saydı; önceki üste çıkmaz, bunun yerine geçer (üstteki daha eski satırlar kalır).</param>
-    public void Show(string text, int durationMs, bool paragraphs, double now, bool replaces = false)
+    /// <param name="box">Oyundaki kaynak satırın normalize ekran kutusu (0–1).</param>
+    public void Show(string text, int durationMs, bool paragraphs, double now, bool replaces = false, TextBox? box = null)
     {
         Prune(now);
+        var nextBox = box ?? (replaces ? current?.Box : null);
         // Önceki satır kısa göründüyse yeni satırın üstünde kalır. Aynı cümlenin başka bir okunuşu ikinci çeviri gibi
         // durmasın diye üste çıkmaz; görev paneli gibi çok satırlı yazılar da üst üste binmez.
         if (replaces && current is not null && !paragraphs)
@@ -75,7 +78,7 @@ public sealed class SubtitleStack
         }
         var reading = 2 + text.Length * 0.06;
         var visible = durationMs > 0 ? Math.Max(MinVisible, durationMs / 1000.0) : Math.Min(8, reading);
-        current = new Current(NextId(), text, paragraphs, now, now + visible, now + Math.Min(HoldMax, reading));
+        current = new Current(NextId(), text, paragraphs, now, now + visible, now + Math.Min(HoldMax, reading), nextBox);
     }
 
     /// <summary>Bilgisayardan gelen "temizle": yazı okunacak kadar görünmediyse kalan süre dolunca kalkar.</summary>
@@ -100,7 +103,7 @@ public sealed class SubtitleStack
     {
         if (current is not { } shown || now >= shown.HideAt) return [];
         var result = new List<Line>();
-        var currentLine = new Line(shown.Id, shown.Text, Role.Current, shown.Paragraphs, false);
+        var currentLine = new Line(shown.Id, shown.Text, Role.Current, shown.Paragraphs, false, shown.Box);
         if (StackDirection == SubtitleStackDirection.Below) result.Add(currentLine);
         var order = StackDirection == SubtitleStackDirection.Below
             ? new[] { (previous, Role.Previous), (older, Role.Older) }
