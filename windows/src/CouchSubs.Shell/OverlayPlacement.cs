@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+using CouchSubs.Core;
+
 namespace CouchSubs.Shell;
 
 /// <summary>Bir ekran alanı (WPF birimiyle).</summary>
@@ -48,6 +50,36 @@ public static class OverlayPlacement
         }
         var placed = Math.Max(SmallestWidth, Math.Round(work.Width * 0.7));
         return new OverlayBounds(work.Left + (work.Width - placed) / 2, work.Bottom - work.Height * 0.04 - height, placed);
+    }
+
+    /// <summary>Altta veya üstte yaslı, yatay hizalı ve genişlik yüzdeli konum hesaplar.</summary>
+    public static OverlayBounds AnchoredPlace(
+        ScreenArea workArea,
+        double height,
+        SubtitleAnchor anchor,
+        int edgePercent,
+        int widthPercent,
+        SubtitleHorizontalAlign horizontalAlign)
+    {
+        var work = workArea.IsUsable ? workArea : Fallback;
+        if (!double.IsFinite(height) || height <= 0) height = Height(0, 1);
+        var fraction = Math.Clamp(widthPercent, 30, 100) / 100.0;
+        var minWidth = Math.Min(SmallestWidth, work.Width);
+        var width = Math.Clamp(Math.Round(work.Width * fraction), minWidth, Math.Max(minWidth, work.Width));
+        var sideMargin = Math.Round(work.Width * 0.02);
+        var left = horizontalAlign switch
+        {
+            SubtitleHorizontalAlign.Left => work.Left + sideMargin,
+            SubtitleHorizontalAlign.Right => work.Right - width - sideMargin,
+            _ => work.Left + (work.Width - width) / 2,
+        };
+        left = Math.Clamp(left, work.Left, Math.Max(work.Left, work.Right - width));
+        var edge = work.Height * (Math.Clamp(edgePercent, 0, 45) / 100.0);
+        var top = anchor == SubtitleAnchor.Top
+            ? work.Top + edge
+            : work.Bottom - edge - height;
+        top = Math.Clamp(top, work.Top, Math.Max(work.Top, work.Bottom - height));
+        return new OverlayBounds(Math.Round(left), Math.Round(top), Math.Round(width));
     }
 
     /// <summary>Kenardan genişletilen pencerenin yeni genişliği: en az <see cref="SmallestWidth"/>, en çok tüm ekranlar.</summary>

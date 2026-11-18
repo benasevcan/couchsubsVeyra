@@ -172,4 +172,34 @@ public class SubtitleStackTests
         Assert.True(SubtitleStack.SameLine("Kapıyı a", "Kapıyı aç!"));
         Assert.False(SubtitleStack.SameLine("No!", "Not now!"));
     }
+
+    [Fact]
+    public void StackDirectionBelowShowsPreviousLinesUnderCurrent()
+    {
+        var stack = new SubtitleStack { StackDirection = SubtitleStackDirection.Below };
+        stack.Show("Birinci", 8000, false, 0);
+        stack.Show("İkinci", 8000, false, 0.5);
+        stack.Show("Üçüncü", 8000, false, 1.0);
+        Assert.Equal(["Üçüncü", "İkinci", "Birinci"], Texts(stack, 1.0));
+        var lines = stack.Lines(1.0);
+        Assert.Equal(SubtitleStack.Role.Current, lines[0].Role);
+        Assert.Equal(SubtitleStack.Role.Previous, lines[1].Role);
+        Assert.Equal(SubtitleStack.Role.Older, lines[2].Role);
+
+        // Dördüncü satır gelince en eski düşer; en yeni satır en üstte kalır.
+        stack.Show("Dördüncü", 8000, false, 1.5);
+        Assert.Equal(["Dördüncü", "Üçüncü", "İkinci"], Texts(stack, 1.5));
+    }
+
+    [Fact]
+    public void StackDirectionBelowFadesPreviousLinesAtSameSchedule()
+    {
+        var stack = new SubtitleStack { StackDirection = SubtitleStackDirection.Below };
+        stack.Show("Birinci", 8000, false, 0);
+        stack.Show("İkinci", 8000, false, 1);
+        Assert.Equal(["İkinci", "Birinci"], Texts(stack, 2.4));
+        Assert.False(stack.Lines(2.4)[1].Fading);
+        Assert.True(stack.Lines(2.6)[1].Fading);
+        Assert.Equal(["İkinci"], Texts(stack, 2.9));
+    }
 }

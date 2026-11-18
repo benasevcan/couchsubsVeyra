@@ -106,6 +106,10 @@ html, body {
   -webkit-transition: opacity 0.4s linear;
   transition: opacity 0.4s linear;
 }
+body.stack-below #subtitle-prev, body.stack-below #subtitle-prev2 {
+  margin-bottom: 0;
+  margin-top: 14px;
+}
 /* İki önceki satır en üstte, daha da soluk durur (ekranda en çok üç satır). Açık sahnede de okunsun diye %60'ın
    altına inmez. */
 #subtitle-prev2 { opacity: 0.6; }

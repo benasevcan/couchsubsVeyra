@@ -40,8 +40,10 @@ public sealed class SubtitleStack
         public double HideAt => FadeAt + PreviousFade;
     }
 
-    /// <summary>Kapalıysa önceki satır üste çıkmaz, yeni satır eskisinin yerine geçer (ayarlardaki seçenek).</summary>
+    /// <summary>Kapalıysa önceki satır yığına çıkmaz, yeni satır eskisinin yerine geçer (ayarlardaki seçenek).</summary>
     public bool StackPrevious { get; set; } = true;
+    /// <summary>Önceki satırların yeni satıra göre yerleşim yönü: üstte (<see cref="SubtitleStackDirection.Above"/>) ya da altta (<see cref="SubtitleStackDirection.Below"/>).</summary>
+    public SubtitleStackDirection StackDirection { get; set; } = SubtitleStackDirection.Above;
 
     private Current? current;
     private Slot? previous;
@@ -98,12 +100,17 @@ public sealed class SubtitleStack
     {
         if (current is not { } shown || now >= shown.HideAt) return [];
         var result = new List<Line>();
-        foreach (var (slot, role) in new[] { (older, Role.Older), (previous, Role.Previous) })
+        var currentLine = new Line(shown.Id, shown.Text, Role.Current, shown.Paragraphs, false);
+        if (StackDirection == SubtitleStackDirection.Below) result.Add(currentLine);
+        var order = StackDirection == SubtitleStackDirection.Below
+            ? new[] { (previous, Role.Previous), (older, Role.Older) }
+            : new[] { (older, Role.Older), (previous, Role.Previous) };
+        foreach (var (slot, role) in order)
         {
             if (slot is null || now >= slot.HideAt) continue;
             result.Add(new Line(slot.Id, slot.Text, role, false, now >= slot.FadeAt));
         }
-        result.Add(new Line(shown.Id, shown.Text, Role.Current, shown.Paragraphs, false));
+        if (StackDirection == SubtitleStackDirection.Above) result.Add(currentLine);
         return result;
     }
 

@@ -68,6 +68,49 @@
                                 </StackPanel>
                             </StackPanel>
                             <StackPanel x:Name="ComputerPlacementPanel" Margin="0,0,0,12">
+                                <TextBlock Text="{t:T 'On-screen placement'}" Margin="0,0,0,8" />
+                                <ComboBox x:Name="ComputerAnchorChoice" SelectionChanged="OnComputerAnchor" Margin="0,0,0,12">
+                                    <ComboBoxItem Content="{t:T 'Bottom (default)'}" Tag="Bottom" />
+                                    <ComboBoxItem Content="{t:T 'Top'}" Tag="Top" />
+                                </ComboBox>
+                                <TextBlock Text="{t:T 'Distance from edge'}" Margin="0,0,0,8" />
+                                <Grid Margin="0,0,0,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="48" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="EdgeNearLabel" Text="0%" Style="{StaticResource HintText}" VerticalAlignment="Center" />
+                                    <Slider x:Name="ComputerEdgePercent" Grid.Column="1" Minimum="0" Maximum="45" SmallChange="1" LargeChange="5" TickFrequency="1"
+                                            IsSnapToTickEnabled="True" Margin="12,0" IsMoveToPointEnabled="True"
+                                            ValueChanged="OnComputerEdgePercent" PreviewMouseDown="OnPositionStart" />
+                                    <TextBlock Grid.Column="2" Text="45%" Style="{StaticResource HintText}" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="ComputerEdgePercentValue" Grid.Column="3" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                               Typography.NumeralAlignment="Tabular" />
+                                </Grid>
+                                <TextBlock Text="{t:T 'Horizontal alignment'}" Margin="0,0,0,8" />
+                                <ComboBox x:Name="HorizontalAlignChoice" SelectionChanged="OnHorizontalAlign" Margin="0,0,0,12">
+                                    <ComboBoxItem Content="{t:T 'Left'}" Tag="Left" />
+                                    <ComboBoxItem Content="{t:T 'Center (default)'}" Tag="Center" />
+                                    <ComboBoxItem Content="{t:T 'Right'}" Tag="Right" />
+                                </ComboBox>
+                                <TextBlock Text="{t:T 'Subtitle box width'}" Margin="0,0,0,8" />
+                                <Grid Margin="0,0,0,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="48" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="30%" Style="{StaticResource HintText}" VerticalAlignment="Center" />
+                                    <Slider x:Name="BoxWidthPercent" Grid.Column="1" Minimum="30" Maximum="100" SmallChange="1" LargeChange="5" TickFrequency="1"
+                                            IsSnapToTickEnabled="True" Margin="12,0" IsMoveToPointEnabled="True"
+                                            ValueChanged="OnBoxWidthPercent" PreviewMouseDown="OnPositionStart" />
+                                    <TextBlock Grid.Column="2" Text="100%" Style="{StaticResource HintText}" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="BoxWidthPercentValue" Grid.Column="3" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                               Typography.NumeralAlignment="Tabular" />
+                                </Grid>
                                 <TextBlock Style="{StaticResource HintText}" TextWrapping="Wrap"
                                            Text="{t:T 'On the computer screen, move the subtitle by dragging its window: press Adjust the subtitle window.'}" />
                                 <Button HorizontalAlignment="Left" Margin="0,8,0,0" Content="{t:T 'Adjust the subtitle window'}" Click="OnAdjustOverlay" />
@@ -107,12 +150,18 @@
                                 <TextBlock x:Name="BackgroundRadiusValue" Grid.Column="3" HorizontalAlignment="Right" VerticalAlignment="Center"
                                            Typography.NumeralAlignment="Tabular" />
                             </Grid>
-                            <CheckBox x:Name="Bold" Content="{t:T 'Bold text'}" Foreground="{DynamicResource textPrimaryBrush}" Margin="0,0,0,12"
-                                      Checked="OnBold" Unchecked="OnBold" />
-                            <CheckBox x:Name="StackPrevious" Content="{t:T 'Keep previous lines above in fast dialogue'}" Foreground="{DynamicResource textPrimaryBrush}" Margin="0,0,0,4"
-                                      Checked="OnStackPrevious" Unchecked="OnStackPrevious" />
-                            <TextBlock Style="{StaticResource HintText}" Margin="0,0,0,12"
-                                       Text="{t:T 'When off, each new line replaces the previous one. Needs TV app 0.9.16 or later.'}" />
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                <CheckBox x:Name="Bold" Content="{t:T 'Bold text'}" Foreground="{DynamicResource textPrimaryBrush}" Margin="0,0,24,0"
+                                          Checked="OnBold" Unchecked="OnBold" />
+                                <CheckBox x:Name="Italic" Content="{t:T 'Italic text'}" Foreground="{DynamicResource textPrimaryBrush}"
+                                          Checked="OnItalic" Unchecked="OnItalic" />
+                            </StackPanel>
+                            <TextBlock Text="{t:T 'Previous lines in fast dialogue'}" Margin="0,0,0,8" />
+                            <ComboBox x:Name="PreviousLinesChoice" SelectionChanged="OnPreviousLines" Margin="0,0,0,12">
+                                <ComboBoxItem Content="{t:T 'Show above'}" Tag="Above" />
+                                <ComboBoxItem Content="{t:T 'Show below'}" Tag="Below" />
+                                <ComboBoxItem Content="{t:T 'Off (replace previous line)'}" Tag="Off" />
+                            </ComboBox>
                             <TextBlock Text="{t:T 'Text color'}" Margin="0,0,0,8" />
                             <ComboBox x:Name="TextColor" SelectionChanged="OnTextColor" Margin="0,0,0,12">
                                 <ComboBoxItem Content="{t:T 'White'}" Tag="White" />
@@ -134,11 +183,27 @@
                             <ComboBox x:Name="FontFamilyChoice" SelectionChanged="OnFontFamily" Margin="0,0,0,12">
                                 <ComboBoxItem Content="{t:T 'Segoe UI (Default)'}" Tag="Segoe UI" />
                                 <ComboBoxItem Content="Arial" Tag="Arial" />
+                                <ComboBoxItem Content="Calibri" Tag="Calibri" />
+                                <ComboBoxItem Content="Noto Sans" Tag="Noto Sans" />
                                 <ComboBoxItem Content="Tahoma" Tag="Tahoma" />
                                 <ComboBoxItem Content="Verdana" Tag="Verdana" />
                                 <ComboBoxItem Content="Trebuchet MS" Tag="Trebuchet MS" />
+                                <ComboBoxItem Content="Impact" Tag="Impact" />
                                 <ComboBoxItem Content="Georgia" Tag="Georgia" />
                                 <ComboBoxItem Content="Consolas" Tag="Consolas" />
+                                <ComboBoxItem Content="Courier New" Tag="Courier New" />
+                            </ComboBox>
+                            <TextBlock Text="{t:T 'Letter case'}" Margin="0,0,0,8" />
+                            <ComboBox x:Name="TextCaseChoice" SelectionChanged="OnTextCase" Margin="0,0,0,12">
+                                <ComboBoxItem Content="{t:T 'Normal'}" Tag="Normal" />
+                                <ComboBoxItem Content="{t:T 'All uppercase'}" Tag="Upper" />
+                            </ComboBox>
+                            <TextBlock Text="{t:T 'Line spacing'}" Margin="0,0,0,8" />
+                            <ComboBox x:Name="LineSpacingChoice" SelectionChanged="OnLineSpacing" Margin="0,0,0,12">
+                                <ComboBoxItem Content="{t:T 'Compact'}" Tag="Compact" />
+                                <ComboBoxItem Content="{t:T 'Normal'}" Tag="Normal" />
+                                <ComboBoxItem Content="{t:T 'Relaxed'}" Tag="Relaxed" />
+                                <ComboBoxItem Content="{t:T 'Loose'}" Tag="Loose" />
                             </ComboBox>
                             <TextBlock Text="{t:T 'Shadow / Outline'}" Margin="0,0,0,8" />
                             <ComboBox x:Name="ShadowStrengthChoice" SelectionChanged="OnShadowStrength" Margin="0,0,0,12">
@@ -152,6 +217,29 @@
                                 <ComboBoxItem Content="{t:T 'Black (Default)'}" Tag="Black" />
                                 <ComboBoxItem Content="{t:T 'Dark gray'}" Tag="DarkGray" />
                                 <ComboBoxItem Content="{t:T 'Navy'}" Tag="Navy" />
+                                <ComboBoxItem Content="{t:T 'Dark purple'}" Tag="DarkPurple" />
+                                <ComboBoxItem Content="{t:T 'Forest green'}" Tag="Forest" />
+                                <ComboBoxItem Content="{t:T 'Wine red'}" Tag="Wine" />
+                                <ComboBoxItem Content="{t:T 'Custom (Hex)'}" Tag="Custom" />
+                            </ComboBox>
+                            <StackPanel x:Name="CustomBgColorPanel" Visibility="Collapsed" Orientation="Horizontal" Margin="0,0,0,12">
+                                <Border x:Name="CustomBgColorPreview" Width="28" Height="28" CornerRadius="6" BorderThickness="1"
+                                        BorderBrush="{DynamicResource borderBrush}" Background="#000000" Margin="0,0,10,0" VerticalAlignment="Center" />
+                                <TextBox x:Name="CustomBgTextColor" Width="120" MaxLength="9" TextChanged="OnCustomBackgroundColor"
+                                         VerticalContentAlignment="Center" ToolTip="#RRGGBB (ör. #141B2D)" />
+                            </StackPanel>
+                            <TextBlock Text="{t:T 'Box padding'}" Margin="0,0,0,8" />
+                            <ComboBox x:Name="BoxPaddingChoice" SelectionChanged="OnBoxPadding" Margin="0,0,0,12">
+                                <ComboBoxItem Content="{t:T 'Compact'}" Tag="Compact" />
+                                <ComboBoxItem Content="{t:T 'Normal'}" Tag="Normal" />
+                                <ComboBoxItem Content="{t:T 'Spacious'}" Tag="Spacious" />
+                            </ComboBox>
+                            <TextBlock Text="{t:T 'Box border'}" Margin="0,0,0,8" />
+                            <ComboBox x:Name="BorderStyleChoice" SelectionChanged="OnBorderStyle" Margin="0,0,0,12">
+                                <ComboBoxItem Content="{t:T 'None'}" Tag="None" />
+                                <ComboBoxItem Content="{t:T 'Subtle'}" Tag="Subtle" />
+                                <ComboBoxItem Content="{t:T 'Accent (Gold)'}" Tag="Accent" />
+                                <ComboBoxItem Content="{t:T 'White'}" Tag="White" />
                             </ComboBox>
                             <!-- Yalnız Android TV: bazı TV'lerde (ör. TCL) uygulama içindeki PS5 görüntüsü siyah kalıyor. -->
                             <StackPanel x:Name="DisplayModePanel" Visibility="Collapsed">

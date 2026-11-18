@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+using System.Globalization;
+using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
 using CouchSubs.Core;
@@ -8,7 +10,7 @@ namespace CouchSubs.App.Views;
 
 /// <summary>
 /// Masaüstü altyazı katmanı (<see cref="SubtitleOverlayWindow"/>) ile yayın penceresinin
-/// (<see cref="StreamWindow"/>) ortak kullandığı yazı tipi, renk, gölge, zemin ve köşe yarıçapı çözücüleri.
+/// (<see cref="StreamWindow"/>) ortak kullandığı yazı tipi, renk, gölge, zemin, hizalama ve kenarlık çözücüleri.
 /// </summary>
 internal static class SubtitleStyleVisuals
 {
@@ -34,12 +36,72 @@ internal static class SubtitleStyleVisuals
         return new SolidColorBrush(color);
     }
 
+    public static Color ResolveBackgroundColor(SubtitleStyle style, byte alpha)
+    {
+        if (style.BackgroundColor == SubtitleBackgroundColor.Custom)
+        {
+            var custom = ParseHexColor(style.CustomBackgroundColor, Colors.Black);
+            custom.A = alpha;
+            return custom;
+        }
+        return ResolveBackgroundColor(style.BackgroundColor, alpha);
+    }
+
     public static Color ResolveBackgroundColor(SubtitleBackgroundColor color, byte alpha) => color switch
     {
         SubtitleBackgroundColor.DarkGray => Color.FromArgb(alpha, 0x1E, 0x20, 0x24),
         SubtitleBackgroundColor.Navy => Color.FromArgb(alpha, 0x0F, 0x17, 0x2A),
+        SubtitleBackgroundColor.DarkPurple => Color.FromArgb(alpha, 0x1E, 0x10, 0x2E),
+        SubtitleBackgroundColor.Forest => Color.FromArgb(alpha, 0x0D, 0x24, 0x18),
+        SubtitleBackgroundColor.Wine => Color.FromArgb(alpha, 0x2B, 0x0E, 0x16),
         _ => Color.FromArgb(alpha, 0x00, 0x00, 0x00),
     };
+
+    public static double ResolveLineHeightFactor(SubtitleLineSpacing spacing) => spacing switch
+    {
+        SubtitleLineSpacing.Compact => 1.15,
+        SubtitleLineSpacing.Relaxed => 1.50,
+        SubtitleLineSpacing.Loose => 1.70,
+        _ => 1.30,
+    };
+
+    public static Thickness ResolveBoxPadding(SubtitleBoxPadding padding, bool current, double scale)
+    {
+        var mult = padding switch
+        {
+            SubtitleBoxPadding.Compact => 0.7,
+            SubtitleBoxPadding.Spacious => 1.4,
+            _ => 1.0,
+        };
+        var h = (current ? 26 : 20) * mult * scale;
+        var v = (current ? 10 : 6) * mult * scale;
+        return new Thickness(h, v, h, v);
+    }
+
+    public static (Brush? Brush, Thickness Thickness) ResolveBorder(SubtitleBorderStyle borderStyle, double scale) => borderStyle switch
+    {
+        SubtitleBorderStyle.Subtle => (new SolidColorBrush(Color.FromArgb(0x66, 0xFF, 0xFF, 0xFF)), new Thickness(Math.Max(1, 1.2 * scale))),
+        SubtitleBorderStyle.Accent => (new SolidColorBrush(Color.FromRgb(0xFF, 0xC8, 0x3D)), new Thickness(Math.Max(1, 1.8 * scale))),
+        SubtitleBorderStyle.White => (new SolidColorBrush(Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF)), new Thickness(Math.Max(1, 1.8 * scale))),
+        _ => (null, new Thickness(0)),
+    };
+
+    public static HorizontalAlignment ResolveHorizontalAlignment(SubtitleHorizontalAlign align) => align switch
+    {
+        SubtitleHorizontalAlign.Left => HorizontalAlignment.Left,
+        SubtitleHorizontalAlign.Right => HorizontalAlignment.Right,
+        _ => HorizontalAlignment.Center,
+    };
+
+    public static TextAlignment ResolveTextAlignment(SubtitleHorizontalAlign align) => align switch
+    {
+        SubtitleHorizontalAlign.Left => TextAlignment.Left,
+        SubtitleHorizontalAlign.Right => TextAlignment.Right,
+        _ => TextAlignment.Center,
+    };
+
+    public static string ApplyTextCase(string text, SubtitleTextCase textCase) =>
+        textCase == SubtitleTextCase.Upper ? text.ToUpper(CultureInfo.CurrentCulture) : text;
 
     public static DropShadowEffect? ResolveShadowEffect(SubtitleShadowStrength strength, double scale) => strength switch
     {

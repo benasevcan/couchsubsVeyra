@@ -75,10 +75,11 @@ public sealed partial class SubtitleOverlayWindow : Window
 
         var root = new Grid();
         root.Children.Add(adjustLayer);
-        root.Children.Add(new Border { Padding = new Thickness(24 * Scale, 0, 24 * Scale, 8 * Scale), Child = linesPanel });
-        root.Children.Add(new Border { Padding = new Thickness(24 * Scale, 8 * Scale, 24 * Scale, 0), Child = regionsPanel });
+        root.Children.Add(new Border { Padding = new Thickness(24 * Scale, 8 * Scale, 24 * Scale, 8 * Scale), Child = linesPanel });
+        root.Children.Add(new Border { Padding = new Thickness(24 * Scale, 8 * Scale, 24 * Scale, 8 * Scale), Child = regionsPanel });
         BuildAdjustLayer();
         Content = root;
+        ApplyAnchorAlignment();
         PlaceFromSettings();
 
         timer.Tick += (_, _) => Guard("zamanlayıcı", () =>
@@ -124,17 +125,26 @@ public sealed partial class SubtitleOverlayWindow : Window
         if (e.PropertyName is not (nameof(AppController.Settings) or nameof(AppController.OverlayAdjusting))) return;
         Guard("ayar değişikliği", () =>
         {
-            // Yazı boyu, rengi ya da zemini değişmiş olabilir; kutular yeniden kurulur.
-            if (e.PropertyName == nameof(AppController.Settings)) boxes.Clear();
+            // Yazı boyu, rengi, yönü ya da konumu değişmiş olabilir; kutular yeniden kurulur.
+            if (e.PropertyName == nameof(AppController.Settings))
+            {
+                var style = controller.Settings.Style;
+                stack.StackPrevious = style.StackPrevious;
+                stack.StackDirection = style.StackDirection;
+                boxes.Clear();
+            }
             ApplyClickThrough();
-            FitHeight();
+            ApplyAnchorAlignment();
+            PlaceFromSettings();
             Refresh();
         });
     }
 
     private void OnEvent(SubtitleEvent e) => Guard("altyazı", () =>
     {
-        stack.StackPrevious = controller.Settings.Style.StackPrevious;
+        var style = controller.Settings.Style;
+        stack.StackPrevious = style.StackPrevious;
+        stack.StackDirection = style.StackDirection;
         switch (e.Kind)
         {
             case SubtitleEventKind.Subtitle:
@@ -267,23 +277,27 @@ public sealed partial class SubtitleOverlayWindow : Window
         var band = style.BackgroundShape == SubtitleBackgroundShape.Band;
         var text = new TextBlock
         {
-            Text = wrapped.Text,
+            Text = SubtitleStyleVisuals.ApplyTextCase(wrapped.Text, style.TextCase),
             FontFamily = SubtitleStyleVisuals.ResolveFontFamily(style.FontFamily),
             FontSize = size,
             FontWeight = style.Bold ? FontWeights.Bold : FontWeights.SemiBold,
+            FontStyle = style.Italic ? FontStyles.Italic : FontStyles.Normal,
             Foreground = SubtitleStyleVisuals.ResolveTextBrush(style),
             TextWrapping = TextWrapping.Wrap,
-            TextAlignment = line.Paragraphs ? TextAlignment.Left : TextAlignment.Center,
-            LineHeight = size * 1.3,
+            TextAlignment = line.Paragraphs ? TextAlignment.Left : SubtitleStyleVisuals.ResolveTextAlignment(style.HorizontalAlign),
+            LineHeight = size * SubtitleStyleVisuals.ResolveLineHeightFactor(style.LineSpacing),
             Effect = SubtitleStyleVisuals.ResolveShadowEffect(style.ShadowStrength, scale),
         };
+        var (borderBrush, borderThickness) = SubtitleStyleVisuals.ResolveBorder(style.BorderStyle, scale);
         return new Border
         {
-            Background = new SolidColorBrush(SubtitleStyleVisuals.ResolveBackgroundColor(style.BackgroundColor, (byte)Math.Round(alpha * 255))),
+            Background = new SolidColorBrush(SubtitleStyleVisuals.ResolveBackgroundColor(style, (byte)Math.Round(alpha * 255))),
+            BorderBrush = borderBrush,
+            BorderThickness = borderThickness,
             CornerRadius = new CornerRadius(SubtitleStyleVisuals.ResolveCornerRadius(style, band, scale)),
-            Padding = current ? new Thickness(26 * scale, 10 * scale, 26 * scale, 10 * scale) : new Thickness(20 * scale, 6 * scale, 20 * scale, 6 * scale),
-            Margin = new Thickness(band ? -24 * scale : 0, 14 * scale, band ? -24 * scale : 0, 0),
-            HorizontalAlignment = band ? HorizontalAlignment.Stretch : HorizontalAlignment.Center,
+            Padding = SubtitleStyleVisuals.ResolveBoxPadding(style.BoxPadding, current, scale),
+            Margin = new Thickness(band ? -24 * scale : 0, 7 * scale, band ? -24 * scale : 0, 7 * scale),
+            HorizontalAlignment = band ? HorizontalAlignment.Stretch : SubtitleStyleVisuals.ResolveHorizontalAlignment(style.HorizontalAlign),
             Opacity = line.Role switch { SubtitleStack.Role.Current => 1, SubtitleStack.Role.Previous => 0.6, _ => 0.45 },
             Child = text,
         };
@@ -296,19 +310,23 @@ public sealed partial class SubtitleOverlayWindow : Window
         var scale = Scale;
         var size = Math.Max(12, OverlayPlacement.FontSize(style.FontSize) * scale * 0.55);
         var middle = area is { } box ? (box.Left + box.Right) / 2 : 0.5;
+        var (borderBrush, borderThickness) = SubtitleStyleVisuals.ResolveBorder(style.BorderStyle, scale * 0.75);
         return new Border
         {
-            Background = new SolidColorBrush(SubtitleStyleVisuals.ResolveBackgroundColor(style.BackgroundColor, 0xD9)),
+            Background = new SolidColorBrush(SubtitleStyleVisuals.ResolveBackgroundColor(style, 0xD9)),
+            BorderBrush = borderBrush,
+            BorderThickness = borderThickness,
             CornerRadius = new CornerRadius(SubtitleStyleVisuals.ResolveCornerRadius(style, fullWidthBand: false, scale * 0.8)),
             Padding = new Thickness(14 * scale, 6 * scale, 14 * scale, 6 * scale),
             Margin = new Thickness(0, 0, 0, 10 * scale),
             HorizontalAlignment = middle < 0.4 ? HorizontalAlignment.Left : middle > 0.6 ? HorizontalAlignment.Right : HorizontalAlignment.Center,
             Child = new TextBlock
             {
-                Text = text,
+                Text = SubtitleStyleVisuals.ApplyTextCase(text, style.TextCase),
                 FontFamily = SubtitleStyleVisuals.ResolveFontFamily(style.FontFamily),
                 FontSize = size,
                 FontWeight = FontWeights.SemiBold,
+                FontStyle = style.Italic ? FontStyles.Italic : FontStyles.Normal,
                 Foreground = SubtitleStyleVisuals.ResolveTextBrush(style),
                 TextWrapping = TextWrapping.Wrap,
                 LineHeight = size * 1.25,
@@ -387,28 +405,30 @@ public sealed partial class SubtitleOverlayWindow : Window
         if (wanted != style) SetWindowLongPtr(handle, GwlExStyle, (IntPtr)wanted);
     }
 
-    /// <summary>Pencere en çok üç satıra (ve satırların kaymasına) yetecek kadar yüksektir; alt kenarı sabit kalır.</summary>
-    private void FitHeight()
+    /// <summary>Üstte/altta yaslamayı ayarlar.</summary>
+    private void ApplyAnchorAlignment()
     {
-        var height = OverlayPlacement.Height(controller.Settings.Style.FontSize, Scale);
-        if (Math.Abs(Height - height) < 0.5) return;
-        var bottom = double.IsNaN(Top) ? double.NaN : Top + Height;
-        Height = height;
-        if (!double.IsNaN(bottom)) Top = bottom - height;
+        var top = controller.Settings.Style.PositionAnchor == SubtitleAnchor.Top;
+        linesPanel.VerticalAlignment = top ? VerticalAlignment.Top : VerticalAlignment.Bottom;
+        regionsPanel.VerticalAlignment = top ? VerticalAlignment.Bottom : VerticalAlignment.Top;
     }
 
     /// <summary>
-    /// Kayıtlı yer (ekranlardan birinde yeterince görünüyorsa) ya da ana ekranın altında ortada, %70 genişlikte. Kayıt
-    /// bozuksa ya da o ekran artık bağlı değilse pencere ekran dışında ya da sıfır genişlikte açılmaz.
+    /// Kullanıcı fareyle taşıdıysa kayıtlı konum korunur; ayar penceresinden Altta/Üstte ya da konum kaydırıcısı
+    /// kullanıldıysa çalışma alanı üzerinden hesaplanan yerleşim uygulanır.
     /// </summary>
     private void PlaceFromSettings()
     {
-        var height = OverlayPlacement.Height(controller.Settings.Style.FontSize, Scale);
+        var style = controller.Settings.Style;
+        var height = OverlayPlacement.Height(style.FontSize, Scale);
         var work = SystemParameters.WorkArea;
-        var place = OverlayPlacement.Place(controller.Settings.Overlay,
-            new ScreenArea(SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenTop,
-                SystemParameters.VirtualScreenWidth, SystemParameters.VirtualScreenHeight),
-            new ScreenArea(work.Left, work.Top, work.Width, work.Height), height);
+        var workArea = new ScreenArea(work.Left, work.Top, work.Width, work.Height);
+        var place = controller.Settings.Overlay is { } saved
+            ? OverlayPlacement.Place(saved,
+                new ScreenArea(SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenTop,
+                    SystemParameters.VirtualScreenWidth, SystemParameters.VirtualScreenHeight),
+                workArea, height)
+            : OverlayPlacement.AnchoredPlace(workArea, height, style.PositionAnchor, style.BottomPercent, style.BoxWidthPercent, style.HorizontalAlign);
         Height = height;
         Width = place.Width;
         Left = place.Left;

@@ -35,13 +35,12 @@ public enum SubtitleBackgroundShape
 
 /// <summary>TV'de altyazının görünümü. Eski sürümün kaydettiği ayarlarda olmayan alanlar varsayılanla dolar.</summary>
 /// <param name="FontSize">36 (küçük), 46 (orta), 58 (büyük), 72 (çok büyük)</param>
-/// <param name="BottomPercent">Sabit yerleşimde altyazının ekranın altından uzaklığı, yüzde.</param>
+/// <param name="BottomPercent">Sabit yerleşimde altyazının kenardan uzaklığı, yüzde.</param>
 /// <param name="Background">Yazının arkasındaki zeminin koyuluğu, yüzde (0: zemin yok).</param>
 /// <param name="BackgroundShape">Zeminin kapladığı alan; eski TV uygulamaları alanı tanımaz, yazı kadar gibi davranır.</param>
 /// <param name="BackgroundRadius">Altyazı çerçevesinin köşe yuvarlaklığı, piksel (0: keskin köşe).</param>
 /// <param name="StackPrevious">
-/// Hızlı konuşmada önceki satır(lar) yeni satırın üstünde kısa süre soluk kalsın mı; kapalıysa yeni satır eskisinin
-/// yerine geçer. TV uygulaması 0.9.16 ve sonrası tanır.
+/// Hızlı konuşmada önceki satır(lar) kısa süre soluk kalsın mı; kapalıysa yeni satır eskisinin yerine geçer.
 /// </param>
 public sealed record SubtitleStyle(
     int FontSize = 46,
@@ -57,7 +56,45 @@ public sealed record SubtitleStyle(
     string FontFamily = "Segoe UI",
     SubtitleShadowStrength ShadowStrength = SubtitleShadowStrength.Normal,
     SubtitleBackgroundColor BackgroundColor = SubtitleBackgroundColor.Black,
-    int BackgroundRadius = 14);
+    int BackgroundRadius = 14,
+    SubtitleStackDirection StackDirection = SubtitleStackDirection.Above,
+    SubtitleAnchor PositionAnchor = SubtitleAnchor.Bottom,
+    int BoxWidthPercent = 70,
+    SubtitleHorizontalAlign HorizontalAlign = SubtitleHorizontalAlign.Center,
+    bool Italic = false,
+    SubtitleLineSpacing LineSpacing = SubtitleLineSpacing.Normal,
+    SubtitleBoxPadding BoxPadding = SubtitleBoxPadding.Normal,
+    SubtitleBorderStyle BorderStyle = SubtitleBorderStyle.None,
+    SubtitleTextCase TextCase = SubtitleTextCase.Normal,
+    string CustomBackgroundColor = "#000000");
+
+/// <summary>Hızlı konuşmada önceki satırların yeni satıra göre konumu.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<SubtitleStackDirection>))]
+public enum SubtitleStackDirection { Above, Below }
+
+/// <summary>Masaüstü ve yayın penceresinde altyazının yaslanacağı dikey ekran kenarı.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<SubtitleAnchor>))]
+public enum SubtitleAnchor { Bottom, Top }
+
+/// <summary>Altyazı kutusunun yatay hizası.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<SubtitleHorizontalAlign>))]
+public enum SubtitleHorizontalAlign { Left, Center, Right }
+
+/// <summary>Çok satırlı altyazıda satır aralığı.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<SubtitleLineSpacing>))]
+public enum SubtitleLineSpacing { Compact, Normal, Relaxed, Loose }
+
+/// <summary>Altyazı kutusunun iç boşluğu.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<SubtitleBoxPadding>))]
+public enum SubtitleBoxPadding { Compact, Normal, Spacious }
+
+/// <summary>Altyazı arka plan çerçevesinin dış kenarlığı.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<SubtitleBorderStyle>))]
+public enum SubtitleBorderStyle { None, Subtle, Accent, White }
+
+/// <summary>Altyazı harf dönüştürme seçeneği.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<SubtitleTextCase>))]
+public enum SubtitleTextCase { Normal, Upper }
 
 /// <summary>
 /// Android TV'de PS5 görüntüsünün nasıl gösterildiği. Yalnız Android TV uygulaması kullanır; diğer TV'ler ve OBS
@@ -93,6 +130,10 @@ public enum SubtitleBackgroundColor
     Black,
     DarkGray,
     Navy,
+    DarkPurple,
+    Forest,
+    Wine,
+    Custom,
 }
 
 /// <summary>Altyazı metninin gölge / dış kenarlık gücü.</summary>
@@ -539,14 +580,24 @@ public sealed class SubtitleServer(int port = 8787, TimeSpan? pingInterval = nul
             ["backgroundRadius"] = Math.Clamp(style.BackgroundRadius, 0, 48),
             ["backgroundShape"] = style.BackgroundShape.ToString().ToLowerInvariant(),
             ["bold"] = style.Bold,
+            ["borderStyle"] = style.BorderStyle.ToString().ToLowerInvariant(),
             ["bottomPercent"] = style.BottomPercent,
+            ["boxPadding"] = style.BoxPadding.ToString().ToLowerInvariant(),
+            ["boxWidthPercent"] = Math.Clamp(style.BoxWidthPercent, 30, 100),
+            ["customBackgroundColor"] = string.IsNullOrWhiteSpace(style.CustomBackgroundColor) ? "#000000" : style.CustomBackgroundColor,
             ["customTextColor"] = string.IsNullOrWhiteSpace(style.CustomTextColor) ? "#FFFFFF" : style.CustomTextColor,
             ["displayMode"] = style.DisplayMode == TvDisplayMode.Overlay ? "overlay" : "inApp",
             ["fontFamily"] = string.IsNullOrWhiteSpace(style.FontFamily) ? "Segoe UI" : style.FontFamily,
             ["fontSize"] = style.FontSize,
+            ["horizontalAlign"] = style.HorizontalAlign.ToString().ToLowerInvariant(),
+            ["italic"] = style.Italic,
+            ["lineSpacing"] = style.LineSpacing.ToString().ToLowerInvariant(),
             ["placement"] = style.Placement.ToString().ToLowerInvariant(),
+            ["positionAnchor"] = style.PositionAnchor.ToString().ToLowerInvariant(),
             ["shadowStrength"] = style.ShadowStrength.ToString().ToLowerInvariant(),
+            ["stackDirection"] = style.StackDirection.ToString().ToLowerInvariant(),
             ["stackPrevious"] = style.StackPrevious,
+            ["textCase"] = style.TextCase.ToString().ToLowerInvariant(),
             ["textColor"] = style.TextColor.ToString().ToLowerInvariant(),
         });
 

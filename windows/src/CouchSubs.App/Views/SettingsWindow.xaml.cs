@@ -48,12 +48,19 @@ public partial class SettingsWindow : Window
         Position.Value = settings.Style.BottomPercent;
         SelectByTag(Placement, settings.Style.Placement.ToString());
         ShowPlacement(settings.Style.Placement);
+        SelectByTag(ComputerAnchorChoice, settings.Style.PositionAnchor.ToString());
+        ComputerEdgePercent.Value = Math.Clamp(settings.Style.BottomPercent, ComputerEdgePercent.Minimum, ComputerEdgePercent.Maximum);
+        ComputerEdgePercentValue.Text = $"{(int)ComputerEdgePercent.Value}%";
+        SelectByTag(HorizontalAlignChoice, settings.Style.HorizontalAlign.ToString());
+        BoxWidthPercent.Value = Math.Clamp(settings.Style.BoxWidthPercent, BoxWidthPercent.Minimum, BoxWidthPercent.Maximum);
+        BoxWidthPercentValue.Text = $"{(int)BoxWidthPercent.Value}%";
         BackgroundOpacity.Value = settings.Style.Background;
         SelectByTag(BackgroundShape, settings.Style.BackgroundShape.ToString());
         BackgroundRadius.Value = Math.Clamp(settings.Style.BackgroundRadius, BackgroundRadius.Minimum, BackgroundRadius.Maximum);
         BackgroundRadiusValue.Text = $"{(int)BackgroundRadius.Value} px";
         Bold.IsChecked = settings.Style.Bold;
-        StackPrevious.IsChecked = settings.Style.StackPrevious;
+        Italic.IsChecked = settings.Style.Italic;
+        SelectByTag(PreviousLinesChoice, settings.Style.StackPrevious ? settings.Style.StackDirection.ToString() : "Off");
         MisreadWait.Value = settings.MisreadWaitMs / 1000.0;
         PartialWait.Value = settings.PartialWaitMs / 1000.0;
         ShowWaits();
@@ -62,8 +69,14 @@ public partial class SettingsWindow : Window
         UpdateCustomColorPreview(settings.Style.TextColor, CustomTextColor.Text);
         var fontName = string.IsNullOrWhiteSpace(settings.Style.FontFamily) ? "Segoe UI" : settings.Style.FontFamily;
         SelectByTag(FontFamilyChoice, fontName, ignoreCase: true);
+        SelectByTag(TextCaseChoice, settings.Style.TextCase.ToString());
+        SelectByTag(LineSpacingChoice, settings.Style.LineSpacing.ToString());
         SelectByTag(ShadowStrengthChoice, settings.Style.ShadowStrength.ToString());
         SelectByTag(BackgroundColorChoice, settings.Style.BackgroundColor.ToString());
+        CustomBgTextColor.Text = string.IsNullOrWhiteSpace(settings.Style.CustomBackgroundColor) ? "#000000" : settings.Style.CustomBackgroundColor;
+        UpdateCustomBgColorPreview(settings.Style.BackgroundColor, CustomBgTextColor.Text);
+        SelectByTag(BoxPaddingChoice, settings.Style.BoxPadding.ToString());
+        SelectByTag(BorderStyleChoice, settings.Style.BorderStyle.ToString());
         SelectByTag(DisplayMode, settings.Style.DisplayMode.ToString());
         // Yalnız çeviri modeli olan diller listelenir; tek dil varsa seçim gösterilmez.
         foreach (var (code, name) in Languages.Where(l => controller.SupportsLanguage(l.Code)))
@@ -837,8 +850,50 @@ public partial class SettingsWindow : Window
         Update(s => s with { Style = s.Style with { BackgroundShape = shape } });
     }
 
+    private void OnComputerAnchor(object sender, SelectionChangedEventArgs e)
+    {
+        if (loading || ComputerAnchorChoice.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
+        var anchor = Enum.Parse<SubtitleAnchor>(tag);
+        Update(s => s with { Overlay = null, Style = s.Style with { PositionAnchor = anchor } });
+    }
+
+    private void OnComputerEdgePercent(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (loading) return;
+        var edge = (int)Math.Round(e.NewValue);
+        ComputerEdgePercentValue.Text = $"{edge}%";
+        Update(s => s with { Overlay = null, Style = s.Style with { BottomPercent = edge } });
+    }
+
+    private void OnHorizontalAlign(object sender, SelectionChangedEventArgs e)
+    {
+        if (loading || HorizontalAlignChoice.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
+        var align = Enum.Parse<SubtitleHorizontalAlign>(tag);
+        Update(s => s with { Overlay = null, Style = s.Style with { HorizontalAlign = align } });
+    }
+
+    private void OnBoxWidthPercent(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (loading) return;
+        var width = (int)Math.Round(e.NewValue);
+        BoxWidthPercentValue.Text = $"{width}%";
+        Update(s => s with { Overlay = null, Style = s.Style with { BoxWidthPercent = width } });
+    }
+
     private void OnBold(object sender, RoutedEventArgs e) =>
         Update(s => s with { Style = s.Style with { Bold = Bold.IsChecked == true } });
+
+    private void OnItalic(object sender, RoutedEventArgs e) =>
+        Update(s => s with { Style = s.Style with { Italic = Italic.IsChecked == true } });
+
+    private void OnPreviousLines(object sender, SelectionChangedEventArgs e)
+    {
+        if (loading || PreviousLinesChoice.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
+        if (tag == "Off")
+            Update(s => s with { Style = s.Style with { StackPrevious = false } });
+        else
+            Update(s => s with { Style = s.Style with { StackPrevious = true, StackDirection = Enum.Parse<SubtitleStackDirection>(tag) } });
+    }
 
     private void OnMisreadWait(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
@@ -867,12 +922,9 @@ public partial class SettingsWindow : Window
         PartialWaitValue.Text = $"{PartialWait.Value.ToString("0.0", System.Globalization.CultureInfo.CurrentCulture)} {unit}";
     }
 
-    private void OnStackPrevious(object sender, RoutedEventArgs e) =>
-        Update(s => s with { Style = s.Style with { StackPrevious = StackPrevious.IsChecked == true } });
-
     private void OnTextColor(object sender, SelectionChangedEventArgs e)
     {
-        if (TextColor.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
+        if (loading || TextColor.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
         var color = Enum.Parse<SubtitleTextColor>(tag);
         UpdateCustomColorPreview(color, CustomTextColor.Text);
         Update(s => s with { Style = s.Style with { TextColor = color } });
@@ -880,47 +932,95 @@ public partial class SettingsWindow : Window
 
     private void OnCustomTextColor(object sender, TextChangedEventArgs e)
     {
-        if (!IsLoaded) return;
-        var raw = CustomTextColor.Text.Trim();
+        if (loading || !IsLoaded) return;
+        var raw = CustomTextColor.Text;
         UpdateCustomColorPreview(controller.Settings.Style.TextColor, raw);
-        var normalized = raw.StartsWith('#') ? raw : "#" + raw;
-        try
-        {
-            if (System.Windows.Media.ColorConverter.ConvertFromString(normalized) is System.Windows.Media.Color)
-                Update(s => s with { Style = s.Style with { CustomTextColor = normalized } });
-        }
-        catch (FormatException) { }
+        if (TryParseHexColor(raw, out var normalized, out _))
+            Update(s => s with { Style = s.Style with { CustomTextColor = normalized } });
     }
 
-    private void UpdateCustomColorPreview(SubtitleTextColor color, string hex)
-    {
-        CustomColorPanel.Visibility = color == SubtitleTextColor.Custom ? Visibility.Visible : Visibility.Collapsed;
-        var normalized = hex.Trim();
-        if (!normalized.StartsWith('#')) normalized = "#" + normalized;
-        try
-        {
-            if (System.Windows.Media.ColorConverter.ConvertFromString(normalized) is System.Windows.Media.Color parsed)
-                CustomColorPreview.Background = new System.Windows.Media.SolidColorBrush(parsed);
-        }
-        catch (FormatException) { }
-    }
+    private void UpdateCustomColorPreview(SubtitleTextColor color, string hex) =>
+        UpdateHexColorPanel(color == SubtitleTextColor.Custom, CustomColorPanel, CustomColorPreview, hex);
 
     private void OnFontFamily(object sender, SelectionChangedEventArgs e)
     {
-        if (FontFamilyChoice.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
+        if (loading || FontFamilyChoice.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
         Update(s => s with { Style = s.Style with { FontFamily = tag } });
+    }
+
+    private void OnTextCase(object sender, SelectionChangedEventArgs e)
+    {
+        if (loading || TextCaseChoice.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
+        Update(s => s with { Style = s.Style with { TextCase = Enum.Parse<SubtitleTextCase>(tag) } });
+    }
+
+    private void OnLineSpacing(object sender, SelectionChangedEventArgs e)
+    {
+        if (loading || LineSpacingChoice.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
+        Update(s => s with { Style = s.Style with { LineSpacing = Enum.Parse<SubtitleLineSpacing>(tag) } });
     }
 
     private void OnShadowStrength(object sender, SelectionChangedEventArgs e)
     {
-        if (ShadowStrengthChoice.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
+        if (loading || ShadowStrengthChoice.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
         Update(s => s with { Style = s.Style with { ShadowStrength = Enum.Parse<SubtitleShadowStrength>(tag) } });
     }
 
     private void OnBackgroundColor(object sender, SelectionChangedEventArgs e)
     {
-        if (BackgroundColorChoice.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
-        Update(s => s with { Style = s.Style with { BackgroundColor = Enum.Parse<SubtitleBackgroundColor>(tag) } });
+        if (loading || BackgroundColorChoice.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
+        var color = Enum.Parse<SubtitleBackgroundColor>(tag);
+        UpdateCustomBgColorPreview(color, CustomBgTextColor.Text);
+        Update(s => s with { Style = s.Style with { BackgroundColor = color } });
+    }
+
+    private void OnCustomBackgroundColor(object sender, TextChangedEventArgs e)
+    {
+        if (loading || !IsLoaded) return;
+        var raw = CustomBgTextColor.Text;
+        UpdateCustomBgColorPreview(controller.Settings.Style.BackgroundColor, raw);
+        if (TryParseHexColor(raw, out var normalized, out _))
+            Update(s => s with { Style = s.Style with { CustomBackgroundColor = normalized } });
+    }
+
+    private void UpdateCustomBgColorPreview(SubtitleBackgroundColor color, string hex) =>
+        UpdateHexColorPanel(color == SubtitleBackgroundColor.Custom, CustomBgColorPanel, CustomBgColorPreview, hex);
+
+    private static void UpdateHexColorPanel(bool visible, FrameworkElement panel, Border preview, string hex)
+    {
+        panel.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        if (TryParseHexColor(hex, out _, out var parsed))
+            preview.Background = new System.Windows.Media.SolidColorBrush(parsed);
+    }
+
+    private static bool TryParseHexColor(string raw, out string normalized, out System.Windows.Media.Color color)
+    {
+        normalized = raw.Trim();
+        color = default;
+        if (string.IsNullOrWhiteSpace(normalized) || normalized == "#") return false;
+        if (!normalized.StartsWith('#')) normalized = "#" + normalized;
+        try
+        {
+            if (System.Windows.Media.ColorConverter.ConvertFromString(normalized) is System.Windows.Media.Color parsed)
+            {
+                color = parsed;
+                return true;
+            }
+        }
+        catch (FormatException) { }
+        return false;
+    }
+
+    private void OnBoxPadding(object sender, SelectionChangedEventArgs e)
+    {
+        if (loading || BoxPaddingChoice.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
+        Update(s => s with { Style = s.Style with { BoxPadding = Enum.Parse<SubtitleBoxPadding>(tag) } });
+    }
+
+    private void OnBorderStyle(object sender, SelectionChangedEventArgs e)
+    {
+        if (loading || BorderStyleChoice.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
+        Update(s => s with { Style = s.Style with { BorderStyle = Enum.Parse<SubtitleBorderStyle>(tag) } });
     }
 
     private void OnDisplayMode(object sender, SelectionChangedEventArgs e)

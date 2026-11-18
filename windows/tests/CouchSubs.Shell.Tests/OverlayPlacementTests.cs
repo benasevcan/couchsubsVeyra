@@ -107,4 +107,28 @@ public class OverlayPlacementTests
         Assert.Equal(OverlayPlacement.Height(46, 1), OverlayPlacement.Height(-5, 1));
         Assert.True(OverlayPlacement.Height(36, 0.5) > 0);
     }
+
+    [Fact]
+    public void AnchoredPlaceSupportsBottomAndTopWithHorizontalAlignmentAndWidth()
+    {
+        var bottomCenter = OverlayPlacement.AnchoredPlace(Work, Height, CouchSubs.Core.SubtitleAnchor.Bottom, 8, 50, CouchSubs.Core.SubtitleHorizontalAlign.Center);
+        Assert.Equal(960, bottomCenter.Width);
+        Assert.Equal(480, bottomCenter.Left);
+        Assert.Equal(Math.Round(1032 - 1032 * 0.08 - Height), bottomCenter.Top);
+
+        var topLeft = OverlayPlacement.AnchoredPlace(Work, Height, CouchSubs.Core.SubtitleAnchor.Top, 10, 40, CouchSubs.Core.SubtitleHorizontalAlign.Left);
+        Assert.Equal(768, topLeft.Width);
+        Assert.Equal(Math.Round(1920 * 0.02), topLeft.Left);
+        Assert.Equal(Math.Round(1032 * 0.10), topLeft.Top);
+
+        var topRight = OverlayPlacement.AnchoredPlace(Work, Height, CouchSubs.Core.SubtitleAnchor.Top, 0, 100, CouchSubs.Core.SubtitleHorizontalAlign.Right);
+        Assert.Equal(1920, topRight.Width);
+        Assert.Equal(0, topRight.Left);
+        Assert.Equal(0, topRight.Top);
+
+        // Aşırı yüzdeler ekran sınırları içinde sıkıştırılır.
+        var clamped = OverlayPlacement.AnchoredPlace(Work, Height, CouchSubs.Core.SubtitleAnchor.Top, 80, 10, CouchSubs.Core.SubtitleHorizontalAlign.Right);
+        Assert.Equal(Math.Round(1920 * 0.30), clamped.Width);
+        Assert.Equal(Math.Round(1032 * 0.45), clamped.Top);
+    }
 }

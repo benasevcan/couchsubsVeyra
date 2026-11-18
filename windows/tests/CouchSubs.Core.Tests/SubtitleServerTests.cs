@@ -259,7 +259,17 @@ public class SubtitleServerTests
             FontFamily: "Arial",
             ShadowStrength: SubtitleShadowStrength.Outline,
             BackgroundColor: SubtitleBackgroundColor.Navy,
-            BackgroundRadius: 24));
+            BackgroundRadius: 24,
+            StackDirection: SubtitleStackDirection.Below,
+            PositionAnchor: SubtitleAnchor.Top,
+            BoxWidthPercent: 60,
+            HorizontalAlign: SubtitleHorizontalAlign.Left,
+            Italic: true,
+            LineSpacing: SubtitleLineSpacing.Relaxed,
+            BoxPadding: SubtitleBoxPadding.Spacious,
+            BorderStyle: SubtitleBorderStyle.Accent,
+            TextCase: SubtitleTextCase.Upper,
+            CustomBackgroundColor: "#331122"));
 
         using var response = await Http.GetAsync($"http://127.0.0.1:{port}/events", HttpCompletionOption.ResponseHeadersRead);
         using var reader = new StreamReader(await response.Content.ReadAsStreamAsync());
@@ -272,6 +282,16 @@ public class SubtitleServerTests
         Assert.Contains("\"fontFamily\":\"Arial\"", data);
         Assert.Contains("\"shadowStrength\":\"outline\"", data);
         Assert.Contains("\"backgroundColor\":\"navy\"", data);
+        Assert.Contains("\"stackDirection\":\"below\"", data);
+        Assert.Contains("\"positionAnchor\":\"top\"", data);
+        Assert.Contains("\"boxWidthPercent\":60", data);
+        Assert.Contains("\"horizontalAlign\":\"left\"", data);
+        Assert.Contains("\"italic\":true", data);
+        Assert.Contains("\"lineSpacing\":\"relaxed\"", data);
+        Assert.Contains("\"boxPadding\":\"spacious\"", data);
+        Assert.Contains("\"borderStyle\":\"accent\"", data);
+        Assert.Contains("\"textCase\":\"upper\"", data);
+        Assert.Contains("\"customBackgroundColor\":\"#331122\"", data);
     }
 
     [Fact]

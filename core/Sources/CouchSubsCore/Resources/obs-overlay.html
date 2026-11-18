@@ -85,8 +85,22 @@
   var BG_RGB = {
     black: '0, 0, 0',
     darkgray: '30, 32, 36',
-    navy: '15, 23, 42'
+    navy: '15, 23, 42',
+    darkpurple: '30, 16, 46',
+    forest: '13, 36, 24',
+    wine: '43, 14, 22'
   };
+  function hexToRgb(hex) {
+    var h = validHex(hex);
+    if (!h) return null;
+    var n = h.slice(1, 7);
+    return parseInt(n.slice(0, 2), 16) + ', ' + parseInt(n.slice(2, 4), 16) + ', ' + parseInt(n.slice(4, 6), 16);
+  }
+  function resolveBgRgb(style) {
+    style = style || {};
+    if (style.backgroundColor === 'custom') return hexToRgb(style.customBackgroundColor) || BG_RGB.black;
+    return BG_RGB[style.backgroundColor] || BG_RGB.black;
+  }
   function validHex(hex) {
     return typeof hex === 'string' && /^#[0-9a-fA-F]{6}$|^#[0-9a-fA-F]{8}$/.test(hex.trim()) ? hex.trim() : null;
   }
@@ -195,11 +209,23 @@
   }
 
   /// Sayfa renkli zeminliyse yarı saydam kutu zeminle karışıp chroma key'i bozar; kutu ya tam koyu ya hiç yoktur.
-  function boxColor(percent, bgColorName) {
+  function boxColor(percent, styleOrName) {
     var alpha = Math.max(0, Math.min(100, percent)) / 100;
     if (pageColor) alpha = alpha > 0 ? 1 : 0;
-    var rgb = BG_RGB[bgColorName] || BG_RGB.black;
+    var rgb = typeof styleOrName === 'object' ? resolveBgRgb(styleOrName) : (BG_RGB[styleOrName] || BG_RGB.black);
     return 'rgba(' + rgb + ', ' + alpha + ')';
+  }
+
+  function applyFixedPosition(el, style) {
+    var edge = Number(fixed.bottom || style.bottomPercent);
+    if (isNaN(edge) || edge < 0 || edge > 85) return;
+    if (style.positionAnchor === 'top') {
+      el.style.bottom = '';
+      el.style.top = edge + '%';
+    } else {
+      el.style.top = '';
+      el.style.bottom = edge + '%';
+    }
   }
 
   function apply(style) {
@@ -208,21 +234,28 @@
     var size = Number(fixed.size || style.fontSize || 48);
     if (size > 0) { baseSize = size; line.style.fontSize = pixels(size * textScale); }
     hintBox.style.fontSize = pixels(Math.max(20, Math.round((size > 0 ? size : 48) * 0.6)));
-    var bottom = Number(fixed.bottom || style.bottomPercent);
-    if (bottom >= 0 && bottom <= 85) {
-      hintBox.style.bottom = bottom + '%';
-      // İngilizce satıra göre yerleşen altyazının kabı ayar gelince sabit yüksekliğe kaymasın.
-      if (shownMode === 'fixed') wrap.style.bottom = bottom + '%';
-    }
+    applyFixedPosition(hintBox, style);
+    // İngilizce satıra göre yerleşen altyazının kabı ayar gelince sabit yüksekliğe kaymasın.
+    if (shownMode === 'fixed') applyFixedPosition(wrap, style);
     var bg = fixed.bg !== null ? Number(fixed.bg) : style.background;
-    var bgName = style.backgroundColor;
-    if (typeof bg === 'number' && !isNaN(bg)) line.style.background = boxColor(bg, bgName);
-    else if (pageColor) line.style.background = boxColor(60, bgName);
+    if (typeof bg === 'number' && !isNaN(bg)) line.style.background = boxColor(bg, style);
+    else if (pageColor) line.style.background = boxColor(60, style);
     var band = style.backgroundShape === 'band';
     if (band) line.style.borderRadius = '0px';
     else if (typeof style.backgroundRadius === 'number' && !isNaN(style.backgroundRadius))
       line.style.borderRadius = radiusPixels(style.backgroundRadius);
     if (typeof style.bold === 'boolean') line.style.fontWeight = style.bold ? '700' : '600';
+    line.style.fontStyle = style.italic ? 'italic' : 'normal';
+    line.style.textTransform = style.textCase === 'upper' ? 'uppercase' : 'none';
+    line.style.lineHeight = style.lineSpacing === 'compact' ? '1.15' : style.lineSpacing === 'relaxed' ? '1.5' : style.lineSpacing === 'loose' ? '1.7' : '1.3';
+    line.style.padding = style.boxPadding === 'compact' ? '0.15em 0.42em' : style.boxPadding === 'spacious' ? '0.42em 0.9em' : '0.25em 0.6em';
+    line.style.border = style.borderStyle === 'subtle' ? '1.5px solid rgba(255,255,255,0.4)' : style.borderStyle === 'accent' ? '2px solid #FFC83D' : style.borderStyle === 'white' ? '2px solid rgba(255,255,255,0.85)' : 'none';
+    wrap.style.justifyContent = style.horizontalAlign === 'left' ? 'flex-start' : style.horizontalAlign === 'right' ? 'flex-end' : 'center';
+    line.style.textAlign = style.horizontalAlign === 'left' ? 'left' : style.horizontalAlign === 'right' ? 'right' : 'center';
+    if (shownMode === 'fixed' && !line.classList.contains('cover')) {
+      var widthPct = Number(style.boxWidthPercent);
+      line.style.maxWidth = (widthPct >= 30 && widthPct <= 100) ? widthPct + 'vw' : '84vw';
+    }
     if (typeof style.fontFamily === 'string' && style.fontFamily.trim())
       line.style.fontFamily = '"' + style.fontFamily.replace(/"/g, '') + '", -apple-system, "Segoe UI", system-ui, sans-serif';
     line.style.textShadow = resolveShadow(style.shadowStrength);
@@ -241,8 +274,8 @@
     node.style.textShadow = line.style.textShadow || '';
     if (lastStyle && typeof lastStyle.backgroundRadius === 'number' && !isNaN(lastStyle.backgroundRadius))
       node.style.borderRadius = radiusPixels(lastStyle.backgroundRadius * 0.8);
-    if (pageColor) node.style.background = 'rgb(' + (BG_RGB[lastStyle && lastStyle.backgroundColor] || BG_RGB.black) + ')';
-    else if (lastStyle && lastStyle.backgroundColor) node.style.background = boxColor(85, lastStyle.backgroundColor);
+    if (pageColor) node.style.background = 'rgb(' + resolveBgRgb(lastStyle || {}) + ')';
+    else if (lastStyle && lastStyle.backgroundColor) node.style.background = boxColor(85, lastStyle);
     if (box) {
       node.style.left = (box.left * 100) + '%';
       node.style.top = (box.top * 100) + '%';
@@ -320,9 +353,8 @@
       // Örtü de "Arka plan koyuluğu"na uyar (eskiden hep %97'ydi, kaydırıcı örtüde işe yaramıyordu); %100 tamamen
       // opaktır. Koyuluğu göndermeyen eski sürümlerde örtü %97 kalır.
       var bg = fixed.bg !== null ? Number(fixed.bg) : (lastStyle && lastStyle.background);
-      var bgName = lastStyle && lastStyle.backgroundColor;
-      line.style.background = typeof bg === 'number' && !isNaN(bg) ? boxColor(bg, bgName) : boxColor(97, bgName);
-      if (pageColor) line.style.background = 'rgb(' + (BG_RGB[bgName] || BG_RGB.black) + ')';
+      line.style.background = typeof bg === 'number' && !isNaN(bg) ? boxColor(bg, lastStyle) : boxColor(97, lastStyle);
+      if (pageColor) line.style.background = 'rgb(' + resolveBgRgb(lastStyle) + ')';
       if (band) line.style.borderRadius = '0px';
       else if (lastStyle && typeof lastStyle.backgroundRadius === 'number' && !isNaN(lastStyle.backgroundRadius))
         line.style.borderRadius = radiusPixels(lastStyle.backgroundRadius);
@@ -361,8 +393,7 @@
       } else {
         wrap.style.left = '';
         wrap.style.right = '';
-        var bottom = Number(fixed.bottom || lastStyle.bottomPercent);
-        if (bottom >= 0 && bottom <= 85) wrap.style.bottom = bottom + '%';
+        applyFixedPosition(wrap, lastStyle || {});
       }
     }
     timer = setTimeout(hide, Math.max(1000, duration || 8000));

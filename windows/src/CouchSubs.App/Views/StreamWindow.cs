@@ -80,10 +80,10 @@ public sealed class StreamWindow : Window
         linesHost = new Border { Child = layers };
         Content = linesHost;
         ApplyBackground();
+        ApplyLayout();
         linesHost.SizeChanged += (_, _) =>
         {
-            linesHost.Padding = new Thickness(24 * Scale, 0, 24 * Scale, linesHost.ActualHeight * 0.07);
-            regionsPanel.Margin = new Thickness(0, 16 * Scale, 0, 0);
+            ApplyLayout();
             boxes.Clear();
             Refresh();
         };
@@ -106,6 +106,20 @@ public sealed class StreamWindow : Window
         };
     }
 
+    private void ApplyLayout()
+    {
+        var style = controller.Settings.Style;
+        var hostH = linesHost.ActualHeight > 0 ? linesHost.ActualHeight : 720;
+        var margin = hostH * (Math.Clamp(style.BottomPercent, 0, 45) / 100.0);
+        var top = style.PositionAnchor == SubtitleAnchor.Top;
+        linesPanel.VerticalAlignment = top ? VerticalAlignment.Top : VerticalAlignment.Bottom;
+        regionsPanel.VerticalAlignment = top ? VerticalAlignment.Bottom : VerticalAlignment.Top;
+        linesHost.Padding = top
+            ? new Thickness(24 * Scale, margin, 24 * Scale, 16 * Scale)
+            : new Thickness(24 * Scale, 16 * Scale, 24 * Scale, margin);
+        regionsPanel.Margin = new Thickness(0, 16 * Scale, 0, 16 * Scale);
+    }
+
     private void ApplyBackground()
     {
         var (red, green, blue) = controller.StreamBackground.Rgb();
@@ -116,7 +130,11 @@ public sealed class StreamWindow : Window
     {
         if (e.PropertyName == nameof(AppController.StreamBackground)) ApplyBackground();
         if (e.PropertyName != nameof(AppController.Settings)) return;
-        // Yazı boyu, rengi ya da zemini değişmiş olabilir; kutular yeniden kurulur.
+        // Yazı boyu, rengi, yönü ya da konumu değişmiş olabilir; kutular yeniden kurulur.
+        var style = controller.Settings.Style;
+        stack.StackPrevious = style.StackPrevious;
+        stack.StackDirection = style.StackDirection;
+        ApplyLayout();
         boxes.Clear();
         Refresh();
     }
@@ -124,7 +142,9 @@ public sealed class StreamWindow : Window
     /// <summary>Saydam penceredekiyle aynı kurallar (bkz. <see cref="SubtitleOverlayWindow"/>).</summary>
     private void OnEvent(SubtitleEvent e)
     {
-        stack.StackPrevious = controller.Settings.Style.StackPrevious;
+        var style = controller.Settings.Style;
+        stack.StackPrevious = style.StackPrevious;
+        stack.StackDirection = style.StackDirection;
         switch (e.Kind)
         {
             case SubtitleEventKind.Subtitle:
@@ -209,25 +229,29 @@ public sealed class StreamWindow : Window
         var dim = line.Role switch { SubtitleStack.Role.Current => 1.0, SubtitleStack.Role.Previous => 0.6, _ => 0.45 };
         var text = new TextBlock
         {
-            Text = wrapped.Text,
+            Text = SubtitleStyleVisuals.ApplyTextCase(wrapped.Text, style.TextCase),
             FontFamily = SubtitleStyleVisuals.ResolveFontFamily(style.FontFamily),
             FontSize = size,
             FontWeight = style.Bold ? FontWeights.Bold : FontWeights.SemiBold,
+            FontStyle = style.Italic ? FontStyles.Italic : FontStyles.Normal,
             Foreground = SubtitleStyleVisuals.ResolveTextBrush(style, boxed ? dim : 1.0),
             TextWrapping = TextWrapping.Wrap,
-            TextAlignment = line.Paragraphs ? TextAlignment.Left : TextAlignment.Center,
-            LineHeight = size * 1.3,
+            TextAlignment = line.Paragraphs ? TextAlignment.Left : SubtitleStyleVisuals.ResolveTextAlignment(style.HorizontalAlign),
+            LineHeight = size * SubtitleStyleVisuals.ResolveLineHeightFactor(style.LineSpacing),
             Effect = boxed ? null : SubtitleStyleVisuals.ResolveShadowEffect(style.ShadowStrength, scale),
         };
+        var (borderBrush, borderThickness) = SubtitleStyleVisuals.ResolveBorder(style.BorderStyle, scale);
         return new Border
         {
             Background = boxed
-                ? new SolidColorBrush(SubtitleStyleVisuals.ResolveBackgroundColor(style.BackgroundColor, 255))
+                ? new SolidColorBrush(SubtitleStyleVisuals.ResolveBackgroundColor(style, 255))
                 : Brushes.Transparent,
+            BorderBrush = borderBrush,
+            BorderThickness = borderThickness,
             CornerRadius = new CornerRadius(SubtitleStyleVisuals.ResolveCornerRadius(style, band, scale)),
-            Padding = current ? new Thickness(26 * scale, 10 * scale, 26 * scale, 10 * scale) : new Thickness(20 * scale, 6 * scale, 20 * scale, 6 * scale),
-            Margin = new Thickness(band ? -24 * scale : 0, 14 * scale, band ? -24 * scale : 0, 0),
-            HorizontalAlignment = band ? HorizontalAlignment.Stretch : HorizontalAlignment.Center,
+            Padding = SubtitleStyleVisuals.ResolveBoxPadding(style.BoxPadding, current, scale),
+            Margin = new Thickness(band ? -24 * scale : 0, 7 * scale, band ? -24 * scale : 0, 7 * scale),
+            HorizontalAlignment = band ? HorizontalAlignment.Stretch : SubtitleStyleVisuals.ResolveHorizontalAlignment(style.HorizontalAlign),
             Child = text,
         };
     }
@@ -239,19 +263,23 @@ public sealed class StreamWindow : Window
         var scale = Scale;
         var size = Math.Max(12, OverlayPlacement.FontSize(style.FontSize) * scale * 0.55);
         var middle = area is { } box ? (box.Left + box.Right) / 2 : 0.5;
+        var (borderBrush, borderThickness) = SubtitleStyleVisuals.ResolveBorder(style.BorderStyle, scale * 0.75);
         return new Border
         {
-            Background = new SolidColorBrush(SubtitleStyleVisuals.ResolveBackgroundColor(style.BackgroundColor, 255)),
+            Background = new SolidColorBrush(SubtitleStyleVisuals.ResolveBackgroundColor(style, 255)),
+            BorderBrush = borderBrush,
+            BorderThickness = borderThickness,
             CornerRadius = new CornerRadius(SubtitleStyleVisuals.ResolveCornerRadius(style, fullWidthBand: false, scale * 0.8)),
             Padding = new Thickness(14 * scale, 6 * scale, 14 * scale, 6 * scale),
             Margin = new Thickness(0, 0, 0, 10 * scale),
             HorizontalAlignment = middle < 0.4 ? HorizontalAlignment.Left : middle > 0.6 ? HorizontalAlignment.Right : HorizontalAlignment.Center,
             Child = new TextBlock
             {
-                Text = text,
+                Text = SubtitleStyleVisuals.ApplyTextCase(text, style.TextCase),
                 FontFamily = SubtitleStyleVisuals.ResolveFontFamily(style.FontFamily),
                 FontSize = size,
                 FontWeight = FontWeights.SemiBold,
+                FontStyle = style.Italic ? FontStyles.Italic : FontStyles.Normal,
                 Foreground = SubtitleStyleVisuals.ResolveTextBrush(style),
                 TextWrapping = TextWrapping.Wrap,
                 LineHeight = size * 1.25,

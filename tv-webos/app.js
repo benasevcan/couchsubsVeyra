@@ -852,6 +852,14 @@
     stackPrevious = typeof style.stackPrevious === 'boolean' ? style.stackPrevious : true;
     save('stackPrevious', stackPrevious ? '1' : '0');
     if (!stackPrevious) hidePrevious();
+    var stackBelow = style.stackDirection === 'below';
+    setClass(document.body, 'stack-below', stackBelow);
+    var subBox = $('subtitle');
+    if (subBox) {
+      var prev = $('subtitle-prev'), prev2 = $('subtitle-prev2'), cur = $('subtitle-text');
+      var order = stackBelow ? [cur, prev, prev2] : [prev2, prev, cur];
+      for (var i = 0; i < order.length; i++) if (order[i]) subBox.appendChild(order[i]);
+    }
     if (typeof style.bold === 'boolean') {
       $('subtitle-text').style.fontWeight = style.bold ? '700' : '600';
       $('subtitle-prev-text').style.fontWeight = style.bold ? '700' : '600';
