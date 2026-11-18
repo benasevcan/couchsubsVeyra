@@ -6,71 +6,30 @@ namespace CouchSubs.Shell.Tests;
 
 public class HotkeyTableTests
 {
-    /// Sayı tuş takımı olmayan dizüstünde de her iş yapılabilsin: her işin bir Num tuşu ve bir Ctrl+Shift+rakam tuşu var.
+    /// Varsayılan olarak hiçbir işin kısayolu önceden seçili gelmez; kullanıcı istediği tuşları kendisi atar.
     [Fact]
-    public void EveryActionHasNumpadAndCtrlShiftKey()
+    public void NoShortcutsAreSelectedByDefault()
     {
+        Assert.Empty(HotkeyTable.Bindings);
+        Assert.Empty(HotkeyTable.Resolve(null));
+        Assert.Empty(HotkeyTable.Resolve([]));
         foreach (var action in Enum.GetValues<HotkeyAction>())
         {
-            var keys = HotkeyTable.Bindings.Where(binding => binding.Action == action).ToList();
-            Assert.Equal(2, keys.Count);
-            Assert.Single(keys, binding => binding.Modifiers == HotkeyModifiers.None);
-            Assert.Single(keys, binding => binding.Modifiers == (HotkeyModifiers.Control | HotkeyModifiers.Shift));
+            Assert.Null(HotkeyTable.DefaultKey(action, 0));
+            Assert.Null(HotkeyTable.DefaultKey(action, 1));
+            Assert.Empty(HotkeyTable.KeysFor(null, action));
         }
     }
 
-    /// Num 9 ile Ctrl+Shift+9 aynı işi yapar (ekranı çevir); diğer rakamlar da öyle.
-    [Theory]
-    [InlineData(HotkeyAction.PauseSubtitles, 0)]
-    [InlineData(HotkeyAction.ExtraRegion1, 1)]
-    [InlineData(HotkeyAction.ExtraRegion2, 2)]
-    [InlineData(HotkeyAction.ExtraRegion3, 3)]
-    [InlineData(HotkeyAction.FreeArea, 5)]
-    [InlineData(HotkeyAction.ClickThrough, 7)]
-    [InlineData(HotkeyAction.Snapshot, 8)]
-    [InlineData(HotkeyAction.Screen, 9)]
-    public void NumpadAndTopRowDigitDoTheSameThing(HotkeyAction action, int digit)
-    {
-        var numpad = HotkeyTable.Bindings.Single(b => b.Modifiers == HotkeyModifiers.None && b.VirtualKey == 0x60u + (uint)digit);
-        var combo = HotkeyTable.Bindings.Single(b => b.Modifiers != HotkeyModifiers.None && b.VirtualKey == 0x30u + (uint)digit);
-        Assert.Equal(action, numpad.Action);
-        Assert.Equal(action, combo.Action);
-        Assert.Equal($"Num {digit}", numpad.Label);
-        Assert.Equal($"Ctrl+Shift+{digit}", combo.Label);
-    }
-
     [Fact]
-    public void NoKeyIsRegisteredTwice() =>
-        Assert.Equal(HotkeyTable.Bindings.Count, HotkeyTable.Bindings.Select(b => (b.Modifiers, b.VirtualKey)).Distinct().Count());
-
-    /// Ctrl+Alt, Türkçe Q klavyede AltGr'dir (AltGr+3 = #, AltGr+7 = {); kısayol bu karakterleri yutmasın.
-    /// Win tuşu da kullanılmaz (Win+rakam görev çubuğundaki uygulamaları açar).
-    [Fact]
-    public void CombosDoNotSwallowAltGrCharacters()
-    {
-        Assert.DoesNotContain(HotkeyTable.Bindings, b => b.Modifiers.HasFlag(HotkeyModifiers.Control) && b.Modifiers.HasFlag(HotkeyModifiers.Alt));
-        Assert.All(HotkeyTable.Bindings, b => Assert.True(b.Modifiers is HotkeyModifiers.None or (HotkeyModifiers.Control | HotkeyModifiers.Shift)));
-    }
-
-    /// Kısayol kimliği sıradan gelir: Num tuşlarının kimlikleri eskisi gibi kalır, yenileri arkadan eklenir.
-    [Fact]
-    public void NumpadKeysComeFirst() =>
-        Assert.All(HotkeyTable.Bindings.Take(HotkeyTable.Digits.Count), b => Assert.Equal(HotkeyModifiers.None, b.Modifiers));
-
-    /// Eski ayar dosyası (kısayol seçimi yok) varsayılan tabloyla açılır.
-    [Fact]
-    public void NoChoicesMeansDefaults() => Assert.Equal(HotkeyTable.Bindings, HotkeyTable.Resolve([]));
-
-    /// Ekranı çevir için Num 9 yerine Alt+F2: Ctrl+Shift+9 kalır, Num 9 artık hiçbir işi yapmaz.
-    [Fact]
-    public void ChangedKeyReplacesOnlyThatSlot()
+    public void ChangedKeySetsOnlyThatSlot()
     {
         var altF2 = new HotkeyKey(HotkeyModifiers.Alt, 0x71);
         var choices = HotkeyTable.Assign([], HotkeyAction.Screen, 0, altF2, out var displaced);
         Assert.Null(displaced);
-        Assert.Equal([altF2, new HotkeyKey(HotkeyTable.ComboModifiers, 0x39)], HotkeyTable.KeysFor(choices, HotkeyAction.Screen));
-        Assert.DoesNotContain(HotkeyTable.Resolve(choices), b => b.Modifiers == HotkeyModifiers.None && b.VirtualKey == 0x69);
-        Assert.Equal("Alt+F2", HotkeyTable.Resolve(choices).Single(b => b.VirtualKey == 0x71).Label);
+        Assert.Equal([altF2], HotkeyTable.KeysFor(choices, HotkeyAction.Screen));
+        Assert.Single(HotkeyTable.Resolve(choices));
+        Assert.Equal("Alt+F2", HotkeyTable.Resolve(choices).Single().Label);
     }
 
     /// Başka işin tuşu seçilirse o işten kaldırılır; iki iş aynı tuşu tutmaz.
@@ -78,21 +37,26 @@ public class HotkeyTableTests
     public void TakenKeyMovesFromOtherAction()
     {
         var num5 = new HotkeyKey(HotkeyModifiers.None, 0x65);
-        var choices = HotkeyTable.Assign([], HotkeyAction.Screen, 0, num5, out var displaced);
+        var ctrlShift5 = new HotkeyKey(HotkeyTable.ComboModifiers, 0x35);
+        var choices = HotkeyTable.Assign([], HotkeyAction.FreeArea, 0, num5, out _);
+        choices = HotkeyTable.Assign(choices, HotkeyAction.FreeArea, 1, ctrlShift5, out _);
+        choices = HotkeyTable.Assign(choices, HotkeyAction.Screen, 0, num5, out var displaced);
         Assert.Equal(HotkeyAction.FreeArea, displaced);
         Assert.Equal(HotkeyAction.Screen, HotkeyTable.Resolve(choices).Single(b => b.VirtualKey == 0x65).Action);
         Assert.Null(HotkeyTable.KeyFor(choices, HotkeyAction.FreeArea, 0));
-        Assert.Equal([new HotkeyKey(HotkeyTable.ComboModifiers, 0x35)], HotkeyTable.KeysFor(choices, HotkeyAction.FreeArea));
+        Assert.Equal([ctrlShift5], HotkeyTable.KeysFor(choices, HotkeyAction.FreeArea));
     }
 
-    /// Kısayol kapatılabilir; varsayılana dönen yuva ayar dosyasında yer kaplamaz.
+    /// Kısayol kapatılabilir; tüm tuşlar temizlenince liste tekrar boş kalır.
     [Fact]
     public void ClearingAndRestoringKeys()
     {
-        var cleared = HotkeyTable.Assign([], HotkeyAction.ClickThrough, 1, null, out _);
-        Assert.Single(HotkeyTable.KeysFor(cleared, HotkeyAction.ClickThrough));
-        var restored = HotkeyTable.Assign(cleared, HotkeyAction.ClickThrough, 1, HotkeyTable.DefaultKey(HotkeyAction.ClickThrough, 1), out _);
-        Assert.Empty(restored);
+        var f6 = new HotkeyKey(HotkeyModifiers.None, 0x75);
+        var assigned = HotkeyTable.Assign([], HotkeyAction.ClickThrough, 0, f6, out _);
+        Assert.Single(HotkeyTable.KeysFor(assigned, HotkeyAction.ClickThrough));
+        var cleared = HotkeyTable.Assign(assigned, HotkeyAction.ClickThrough, 0, null, out _);
+        Assert.Empty(HotkeyTable.KeysFor(cleared, HotkeyAction.ClickThrough));
+        Assert.Empty(cleared);
     }
 
     /// Ayar dosyası elle bozulsa da (aynı tuş iki işte, geçersiz tuş) tutulan tabloda çakışma olmaz.
@@ -101,6 +65,7 @@ public class HotkeyTableTests
     {
         HotkeyChoice[] choices =
         [
+            new(HotkeyAction.Screen, 0, new HotkeyKey(HotkeyModifiers.None, 0x69)),
             new(HotkeyAction.Screen, 1, new HotkeyKey(HotkeyModifiers.None, 0x41)),
             new(HotkeyAction.FreeArea, 1, new HotkeyKey(HotkeyModifiers.None, 0x69)),
         ];

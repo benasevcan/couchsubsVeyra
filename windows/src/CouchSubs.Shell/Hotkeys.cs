@@ -99,17 +99,13 @@ public static class HotkeyTable
         (HotkeyAction.ClickThrough, 7),
     ];
 
-    /// <summary>Varsayılan tablo: önce bütün Num tuşları, sonra Ctrl+Shift+rakam tuşları; sırası kısayol kimliğini belirler.</summary>
+    /// <summary>Varsayılan tablo boştur; tüm kısayol tuşlarını kullanıcı Ayarlar › Kısayollar'dan seçer.</summary>
     public static IReadOnlyList<HotkeyBinding> Bindings { get; } = Resolve(null);
 
-    /// <summary>İşin varsayılan tuşu: 0. yuva Num rakamı, 1. yuva Ctrl+Shift+rakam.</summary>
-    public static HotkeyKey DefaultKey(HotkeyAction action, int slot)
-    {
-        var digit = (uint)Digits.Single(entry => entry.Action == action).Digit;
-        return slot == 0 ? new HotkeyKey(HotkeyModifiers.None, NumPad0 + digit) : new HotkeyKey(ComboModifiers, Digit0 + digit);
-    }
+    /// <summary>Varsayılan olarak hiçbir işin kısayol tuşu atanmaz (kullanıcı kendisi belirler).</summary>
+    public static HotkeyKey? DefaultKey(HotkeyAction action, int slot) => null;
 
-    /// <summary>Kullanıcının seçimine göre işin o yuvadaki tuşu; kapatıldıysa null.</summary>
+    /// <summary>Kullanıcının seçimine göre işin o yuvadaki tuşu; atanmadıysa null.</summary>
     public static HotkeyKey? KeyFor(IReadOnlyList<HotkeyChoice>? choices, HotkeyAction action, int slot)
     {
         var choice = choices?.LastOrDefault(c => c.Action == action && c.Slot == slot);
