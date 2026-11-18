@@ -6,10 +6,14 @@ CouchSubs'ın yeni deneme sürümü. Türkçe dil desteği olmayan PS5 oyunları
 
 **Bu sürümde yeni**
 
-- **Çeviri durunca TV uygulaması da kapanır (Mac ve Windows, #339):** Bilgisayarda çeviriyi durdurunca ya da TV çıktısını kaldırınca TV uygulaması kapanıyor, TV kendi HDMI girişine (PS5'e) dönüyor; kumandayla ayrıca çıkmak gerekmiyor. Görüntü kaynağı ya da Xbox ayarı değişince yapılan iç yeniden başlatmada TV kapanmıyor. Katkı: [erenbati](https://github.com/erenbati) (#317).
-- **Yerel modelde kısa bekleme (Mac ve Windows, #329):** Yalnız yerel model (Ollama, LM Studio) kullanılırken bir hatadan sonra bekleme 1 dakika yerine 5 saniye; tek bir zaman aşımı ya da bozuk yanıt artık yalnız birkaç satırı etkiliyor. Katkı: [lones8888](https://github.com/lones8888).
-- **TV uygulaması 0.9.24:** Bilgisayardan gelen kapanma isteğini tanıyor (LG, Samsung, Android TV). TV'deki uygulama kendiliğinden güncellenir.
-- **Android telefon:** [Google Play](https://play.google.com/store/apps/details?id=com.couchsubs.mobile) üzerinden güncelleniyor (0.1.0-beta.55).
+- **Mac'te Android/Google TV seçince çökme giderildi (#359, #365):** Kurulumda Android TV ya da Google TV seçip "Devam"a basınca uygulama kapanıyordu; artık sonraki adıma geçiyor.
+- **Samsung'da yanlış Host PC IP kurulumdan önce uyarılıyor (#361):** TV'nin Geliştirici modunda yazılı Host PC IP bu bilgisayarın adresi değilse kurulum başlamadan söyleniyor; bilgisayarın adresi TV'ye giden ağ yolundan alınıyor.
+- **Windows'ta gelişmiş yazı tanıma (isteğe bağlı, #336):** Ayarlar › Gelişmiş › Yazı tanıma'da "Gelişmiş · açık sahneleri daha iyi okur" seçilirse altyazı PaddleOCR PP-OCRv6 ile okunuyor; gökyüzü, kar gibi açık zeminde beyaz altyazı daha az kaçıyor. Varsayılan değişmedi. Katkı: [erayslyrt00](https://github.com/erayslyrt00).
+- **Mac'te konsolsuz deneme modu (#345):** PS5 ve PSN hesabı olmadan örnek altyazılarla uygulamanın nasıl çalıştığı görülebiliyor.
+- **Telefonlar (Android, iPhone, #364, #348):** TV'nin IP alanında adresin TV'de nerede bulunacağı ve telefonun kendi adresi gösteriliyor; yanlışlıkla telefonun adresi yazılırsa uyarılıyor. Telefon kısmı Play/App Store güncellemesiyle gelir.
+- **Android telefon:** [Google Play](https://play.google.com/store/apps/details?id=com.couchsubs.mobile) üzerinden güncelleniyor (0.1.0-beta.55). TV uygulaması 0.9.24'te kaldı.
+
+**beta.47'de gelenler:** çeviri durunca TV uygulamasının kapanması (TV uygulaması 0.9.24, katkı: erenbati), yerel modelde hata sonrası 5 saniyelik bekleme (katkı: lones8888).
 
 **beta.46'da gelenler:** oyuna göre okuma alanları, sekiz tutamaçlı alan seçici, yeni ölçüler ve bilgi karosu, Windows'ta değiştirilebilir kısayollar, dakika sınırında satır düşmesinin giderilmesi, konuşan adlarının ve zaten Türkçe olan satırların çevrilmemesi, telefonda Gemini model seçimi, Windows'ta üstte kalan altyazı penceresi ve bilgisayarda Xbox sesi, TV uygulaması 0.9.23 (HDMI girişi verilmeyen TV'de yardım). Katkı: erayslyrt00, erenbati, Berkovant, enesbayar.
 

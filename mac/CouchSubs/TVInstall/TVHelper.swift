@@ -92,6 +92,9 @@ enum TVHelper {
         process.standardError = errors
         process.standardInput = input
         let command = arguments.first ?? ""
+        // Görev iptal edilmişse (ör. TV adımından "Devam"la çıkıldı) iptal bloğu süreç başlamadan çalışır; başlamamış
+        // sürece terminate() uygulamayı çökertiyordu (#359). Başlatma ve durdurma bu yüzden aynı kilitten geçer.
+        let lifetime = ProcessCancellation(process)
 
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Result, Error>) in
@@ -99,7 +102,10 @@ enum TVHelper {
                 let exited = DispatchSemaphore(value: 0)
                 process.terminationHandler = { _ in exited.signal() }
                 do {
-                    try process.run()
+                    try lifetime.launch()
+                } catch is CancellationError {
+                    once.resume(.failure(CancellationError()))
+                    return
                 } catch {
                     TVInstallLog.write("couchsubs-tv-helper açılamadı: \(error)")
                     once.resume(.failure(DevModeFailure(.installFailed, detail: "couchsubs-tv-helper açılamadı: \(error.localizedDescription)")))
@@ -139,7 +145,7 @@ enum TVHelper {
             }
         } onCancel: {
             try? input.fileHandleForWriting.close()
-            process.terminate()
+            lifetime.cancel()
         }
     }
 
