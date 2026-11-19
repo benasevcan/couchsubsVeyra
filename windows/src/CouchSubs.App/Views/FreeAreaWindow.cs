@@ -28,6 +28,7 @@ public sealed class FreeAreaWindow : Window
     private readonly Canvas canvas;
     private readonly Rectangle selection;
     private readonly Border resultPanel;
+    private readonly ScrollViewer resultScroll;
     private readonly TextBlock sourceText;
     private readonly TextBlock resultText;
     private readonly Button copyButton;
@@ -99,16 +100,16 @@ public sealed class FreeAreaWindow : Window
         sourceText = new TextBlock
         {
             Foreground = new SolidColorBrush(Color.FromArgb(0xB8, 0xFF, 0xFF, 0xFF)),
-            FontSize = Math.Max(13, frame.Height * 0.020),
+            FontSize = Math.Max(13, frame.Height * 0.018),
             TextWrapping = TextWrapping.Wrap,
             MaxWidth = frame.Width * 0.52,
-            Margin = new Thickness(0, 0, 0, frame.Height * 0.008),
+            Margin = new Thickness(0, frame.Height * 0.012, 0, 0),
             Visibility = Visibility.Collapsed,
         };
         resultText = new TextBlock
         {
             Foreground = Brushes.White,
-            FontSize = Math.Max(16, frame.Height * 0.030),
+            FontSize = Math.Max(16, frame.Height * 0.028),
             FontWeight = FontWeights.SemiBold,
             TextWrapping = TextWrapping.Wrap,
             MaxWidth = frame.Width * 0.52,
@@ -137,10 +138,24 @@ public sealed class FreeAreaWindow : Window
             }
             catch { }
         };
-        var resultStack = new StackPanel();
-        resultStack.Children.Add(sourceText);
-        resultStack.Children.Add(resultText);
-        resultStack.Children.Add(copyButton);
+        var textStack = new StackPanel();
+        textStack.Children.Add(resultText);
+        textStack.Children.Add(sourceText);
+        resultScroll = new ScrollViewer
+        {
+            Content = textStack,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            CanContentScroll = false,
+            Padding = new Thickness(0, 0, frame.Height * 0.006, 0),
+        };
+        var resultLayout = new Grid();
+        resultLayout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        resultLayout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        Grid.SetRow(resultScroll, 0);
+        Grid.SetRow(copyButton, 1);
+        resultLayout.Children.Add(resultScroll);
+        resultLayout.Children.Add(copyButton);
         resultPanel = new Border
         {
             Background = new SolidColorBrush(Color.FromArgb(0xEB, 0x10, 0x12, 0x16)),
@@ -148,7 +163,10 @@ public sealed class FreeAreaWindow : Window
             BorderThickness = new Thickness(Math.Max(1, frame.Height / 720.0)),
             CornerRadius = new CornerRadius(frame.Height * 0.012),
             Padding = new Thickness(frame.Height * 0.018),
-            Child = resultStack,
+            MaxHeight = frame.Height * 0.84,
+            MaxWidth = frame.Width * 0.58,
+            Cursor = Cursors.Arrow,
+            Child = resultLayout,
             Visibility = Visibility.Collapsed,
         };
         resultPanel.MouseLeftButtonDown += (_, e) => e.Handled = true;
@@ -280,7 +298,10 @@ public sealed class FreeAreaWindow : Window
         }
     }
 
-    /// <summary>Metni seçilen alanın altına (sığmıyorsa üstüne) koyar.</summary>
+    /// <summary>
+    /// Metni ekran sınırları içinde tutacak şekilde yerleştirir: önce seçilen alanın altına, sığmazsa üstüne,
+    /// o da sığmazsa sağına ya da soluna koyar; uzun metinlerde kart ekranı aşmaz ve kaydırılabilir.
+    /// </summary>
     private void ShowResult(string text, Rect area, string? source = null)
     {
         lastTranslation = string.IsNullOrWhiteSpace(source) ? "" : text;
@@ -289,14 +310,53 @@ public sealed class FreeAreaWindow : Window
         copyButton.Content = Localizer.Current["Copy"];
         copyButton.Visibility = string.IsNullOrWhiteSpace(lastTranslation) ? Visibility.Collapsed : Visibility.Visible;
         resultText.Text = text;
+        resultScroll.ScrollToTop();
         resultPanel.Visibility = Visibility.Visible;
-        resultPanel.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        var size = resultPanel.DesiredSize;
+
+        var topMargin = frame.Height * 0.065;
+        var bottomMargin = frame.Height * 0.025;
+        var sideMargin = frame.Width * 0.015;
+        var maxHeight = Math.Max(120, frame.Height - topMargin - bottomMargin);
+        var maxWidth = Math.Max(200, Math.Min(frame.Width * 0.58, frame.Width - sideMargin * 2));
+        resultPanel.MaxHeight = maxHeight;
+        resultPanel.MaxWidth = maxWidth;
+        resultPanel.Measure(new Size(maxWidth, maxHeight));
+        var size = new Size(Math.Min(resultPanel.DesiredSize.Width, maxWidth), Math.Min(resultPanel.DesiredSize.Height, maxHeight));
+
         var gap = frame.Height * 0.012;
-        var y = area.Bottom + gap;
-        if (y + size.Height > frame.Height) y = area.Top - gap - size.Height;
-        y = Math.Clamp(y, 0, Math.Max(0, frame.Height - size.Height));
-        var x = Math.Clamp(area.Left, 0, Math.Max(0, frame.Width - size.Width));
+        var minY = topMargin;
+        var maxY = Math.Max(minY, frame.Height - bottomMargin - size.Height);
+        var minX = sideMargin;
+        var maxX = Math.Max(minX, frame.Width - sideMargin - size.Width);
+
+        double x;
+        double y;
+        if (area.Bottom + gap + size.Height <= frame.Height - bottomMargin)
+        {
+            x = Math.Clamp(area.Left, minX, maxX);
+            y = Math.Clamp(area.Bottom + gap, minY, maxY);
+        }
+        else if (area.Top - gap - size.Height >= topMargin)
+        {
+            x = Math.Clamp(area.Left, minX, maxX);
+            y = Math.Clamp(area.Top - gap - size.Height, minY, maxY);
+        }
+        else if (area.Right + gap + size.Width <= frame.Width - sideMargin)
+        {
+            x = area.Right + gap;
+            y = Math.Clamp(area.Top, minY, maxY);
+        }
+        else if (area.Left - gap - size.Width >= sideMargin)
+        {
+            x = area.Left - gap - size.Width;
+            y = Math.Clamp(area.Top, minY, maxY);
+        }
+        else
+        {
+            x = Math.Clamp(area.Left, minX, maxX);
+            y = Math.Clamp(area.Top, minY, maxY);
+        }
+
         Canvas.SetLeft(resultPanel, x);
         Canvas.SetTop(resultPanel, y);
     }
