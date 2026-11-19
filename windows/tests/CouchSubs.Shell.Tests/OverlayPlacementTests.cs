@@ -192,4 +192,23 @@ public class OverlayPlacementTests
             isBand: false, hasBackground: true, adjusting: false, sidePadding: 24);
         Assert.Equal(Math.Round(0.10 * 1080), merged.MinBoxHeight);
     }
+
+    [Fact]
+    public void CoverForSourceAlignsOverlayVerticallyDirectlyOverSourceSubtitle()
+    {
+        var bottomWin = OverlayPlacement.AnchoredPlace(Work, Height, CouchSubs.Core.SubtitleAnchor.Bottom, 4, 70, CouchSubs.Core.SubtitleHorizontalAlign.Center);
+        var raised = OverlayPlacement.CoverForSource(
+            Work, 1080, bottomWin, Height,
+            new CouchSubs.Core.TextBox(0.30, 0.82, 0.70, 0.86),
+            CouchSubs.Core.SubtitleHorizontalAlign.Center,
+            isBand: false, hasBackground: true, adjusting: false, sidePadding: 24);
+        var lower = OverlayPlacement.CoverForSource(
+            Work, 1080, bottomWin, Height,
+            new CouchSubs.Core.TextBox(0.30, 0.92, 0.70, 0.96),
+            CouchSubs.Core.SubtitleHorizontalAlign.Center,
+            isBand: false, hasBackground: true, adjusting: false, sidePadding: 24);
+        Assert.True(raised.Window.Top < lower.Window.Top);
+        Assert.Equal(Math.Round(0.86 * 1080 + 0.014 * 1080 - Height), raised.Window.Top);
+        Assert.Equal(Math.Round(0.96 * 1080 + 0.014 * 1080 - Height), lower.Window.Top);
+    }
 }

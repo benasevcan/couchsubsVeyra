@@ -106,12 +106,22 @@ public static class OverlayPlacement
         var fullH = double.IsFinite(screenHeight) && screenHeight > 0 ? screenHeight : work.Height;
         // Birden fazla ayrı yazı (ör. konuşma + görev satırı) aynı kutuda birleşse bile siyah zemin ekrana taşmasın.
         var coverHeight = sourceBox is { } s ? Math.Clamp(s.Bottom - s.Top + 0.016, 0, 0.10) * fullH : 0;
-        if (isBand) return new CoverLayout(new OverlayBounds(work.Left, baseWindow.Top, work.Width), 0, Math.Round(coverHeight));
-        if (sourceBox is not { } box) return new CoverLayout(baseWindow, 0, 0);
+        if (sourceBox is not { } box)
+            return isBand
+                ? new CoverLayout(new OverlayBounds(work.Left, baseWindow.Top, work.Width), 0, 0)
+                : new CoverLayout(baseWindow, 0, 0);
 
-        var sourceY = ((box.Top + box.Bottom) / 2.0) * fullH;
+        var sourceY = work.Top + ((box.Top + box.Bottom) / 2.0) * fullH;
         if (sourceY < baseWindow.Top - 40 || sourceY > baseWindow.Top + windowHeight + 90)
-            return new CoverLayout(baseWindow, 0, 0);
+            return isBand
+                ? new CoverLayout(new OverlayBounds(work.Left, baseWindow.Top, work.Width), 0, Math.Round(coverHeight))
+                : new CoverLayout(baseWindow, 0, 0);
+
+        // Türkçe altyazı kutusu, çevrilen oyuniçi altyazının tam üstüne otursun diye pencerenin alt kenarını
+        // kaynak satırın alt kenarına hizalar (altta yaslı kaplamada kutu pencerenin altındadır).
+        var targetBottom = Math.Clamp(work.Top + box.Bottom * fullH + 0.014 * fullH, work.Top + coverHeight, work.Top + fullH);
+        var alignedTop = Math.Round(Math.Clamp(targetBottom - windowHeight, work.Top, Math.Max(work.Top, work.Top + fullH - windowHeight)));
+        if (isBand) return new CoverLayout(new OverlayBounds(work.Left, alignedTop, work.Width), 0, Math.Round(coverHeight));
 
         var leftFrac = Math.Clamp(box.Left - 0.02, 0, 1);
         var rightFrac = Math.Clamp(box.Right + 0.02, leftFrac, 1);
@@ -121,7 +131,7 @@ public static class OverlayPlacement
         var pad = Math.Max(0, sidePadding);
         var newLeft = Math.Round(Math.Max(work.Left, Math.Min(baseWindow.Left, coverLeft - pad)));
         var newRight = Math.Round(Math.Min(work.Right, Math.Max(baseWindow.Left + baseWindow.Width, coverRight + pad)));
-        var window = new OverlayBounds(newLeft, baseWindow.Top, Math.Max(SmallestWidth, newRight - newLeft));
+        var window = new OverlayBounds(newLeft, alignedTop, Math.Max(SmallestWidth, newRight - newLeft));
 
         var innerLeft = window.Left + pad;
         var innerRight = window.Left + window.Width - pad;

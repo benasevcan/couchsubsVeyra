@@ -122,4 +122,17 @@ public class SubtitleBlockTests
         var reading = new Reading([Line("I TOLD YOU", 0.42, 0.7, 0.58), Line("NOT TO GO THERE.", 0.4, 0.78, 0.6)]);
         Assert.Equal("I TOLD YOU\nNOT TO GO THERE.", reading.SubtitleBlock(Area).Text);
     }
+
+    [Fact]
+    public void LongControllerHintBelowSubtitleDoesNotHideDialogue()
+    {
+        Assert.True(ButtonPrompts.IsPrompt("Hold L2 or R2 and aim around until you locate a signal"));
+        Assert.True(ButtonPrompts.IsPrompt("Hold or and aim around until you locate a signal"));
+        Assert.False(ButtonPrompts.IsPrompt("Hold on, I'm coming!"));
+        var reading = new Reading([
+            Line("I had to put it in time-out", 0.35, 0.65, 0.65),
+            Line("Hold or and aim around until you locate a signal", 0.25, 0.90, 0.75),
+        ]);
+        Assert.Equal("I had to put it in time-out", reading.WithoutButtonPrompts().SubtitleBlock(Area).Text);
+    }
 }

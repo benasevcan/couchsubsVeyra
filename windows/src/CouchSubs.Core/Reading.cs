@@ -221,9 +221,18 @@ public static class ButtonPrompts
         if (Lookalikes.Contains(first) && tokens.Count is >= 2 and <= 4 && char.IsUpper(tokens[1][0]) &&
             !SubtitleStabilizer.EndsSentence(line))
             return true;
-        // "Press ✕ to jump", "Hold R2 to aim"
-        if (Verbs.Contains(first) && tokens.Count is >= 2 and <= 10)
-            return Buttons.Contains(tokens[1]) || Lookalikes.Contains(tokens[1]);
+        // "Press ✕ to jump", "Hold R2 to aim", "Hold L2 or R2 and aim around until you locate a signal"
+        if (Verbs.Contains(first) && tokens.Count is >= 2 and <= 16)
+        {
+            if (Buttons.Contains(tokens[1]) || Lookalikes.Contains(tokens[1])) return true;
+            // Yazı tanıma grafik düğme simgelerini atlayınca ("Hold [L2] or [R2] and aim..." → "Hold or and aim...")
+            // eylem fiilinin hemen ardından bağlaç gelir; konuşma cümlesinde bu kalıp bulunmaz.
+            if (tokens.Count >= 4 && !SubtitleStabilizer.EndsSentence(line)
+                && (tokens[1].Equals("or", StringComparison.OrdinalIgnoreCase)
+                    || tokens[1].Equals("to", StringComparison.OrdinalIgnoreCase)
+                    || tokens[1].Equals("and", StringComparison.OrdinalIgnoreCase)))
+                return true;
+        }
         return false;
     }
 
