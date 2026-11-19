@@ -2616,7 +2616,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             if (isRunning && settings.OcrEngine == OcrEngine.Advanced) MakePipeline();
         }
         catch (Exception error) when (error is HttpRequestException or IOException or InvalidDataException or TaskCanceledException
-                                          or UnauthorizedAccessException)
+                                          or TimeoutException or UnauthorizedAccessException)
         {
             AdvancedOcrError = error.Message;
         }
@@ -2653,7 +2653,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             if (settings.Dubbing.Enabled && isRunning) MakeDubber()?.Prepare();
         }
         catch (Exception error) when (error is HttpRequestException or IOException or InvalidDataException or TaskCanceledException
-                                          or UnauthorizedAccessException)
+                                          or TimeoutException or UnauthorizedAccessException)
         {
             DubbingError = error.Message;
         }

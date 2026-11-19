@@ -9,7 +9,7 @@
     <UseWPF>true</UseWPF>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>CouchSubs</AssemblyName>
-    <Version>0.1.0-beta.50</Version>
+    <Version>0.1.0-beta.51</Version>
     <RootNamespace>CouchSubs.App</RootNamespace>
     <ApplicationIcon>Assets\CouchSubs.ico</ApplicationIcon>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>

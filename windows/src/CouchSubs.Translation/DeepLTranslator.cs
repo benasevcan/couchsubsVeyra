@@ -25,10 +25,48 @@ public sealed class DeepLTranslator : ITextTranslator, IOnlineTranslator
     public const string EngineId = "deepl";
     /// <summary>Bağlama giden önceki satır sayısı.</summary>
     internal const int ContextLines = 3;
-    /// <summary>Hata sonrası bu süre DeepL denenmez; her satırda bağlantı zaman aşımını beklemeyelim.</summary>
-    private static readonly TimeSpan RetryAfter = TimeSpan.FromMinutes(1);
+    /// <summary>Hata sonrası bu süre DeepL denenmez; her satırda bağlantı zaman aşımını beklemeyelim. 1 dk oyunda çok uzundu.</summary>
+    private static readonly TimeSpan RetryAfter = TimeSpan.FromSeconds(15);
 
-    private static readonly Lazy<HttpClient> SharedClient = new(() => new HttpClient { Timeout = TimeSpan.FromSeconds(4) });
+    /// <summary>
+    /// Ortak bağlantı uzun süre açık kalır: boşta kalan bağlantı varsayılan olarak bir dakikada kapanıyor, sessizlikten
+    /// sonraki ilk satır yeni TLS el sıkışmasını bekliyordu (~0,3 sn fazladan).
+    /// </summary>
+    private static readonly Lazy<HttpClient> SharedClient = new(() => new HttpClient(new SocketsHttpHandler
+    {
+        PooledConnectionIdleTimeout = TimeSpan.FromMinutes(15),
+        PooledConnectionLifetime = TimeSpan.FromMinutes(30),
+        KeepAlivePingDelay = TimeSpan.FromSeconds(30),
+        KeepAlivePingTimeout = TimeSpan.FromSeconds(10),
+        KeepAlivePingPolicy = HttpKeepAlivePingPolicy.Always,
+    }) { Timeout = TimeSpan.FromSeconds(4) });
+
+    /// <summary>Bağlantıyı sıcak tutan istekler arası süre; sunucu tarafı boşta bağlantıyı genelde 60 sn'de kapatır.</summary>
+    internal static readonly TimeSpan KeepWarmEvery = TimeSpan.FromSeconds(40);
+    /// <summary>Son çeviriden bu kadar sonra bağlantı sıcak tutulmaz (oyun bitti, uygulama boşta).</summary>
+    internal static readonly TimeSpan KeepWarmFor = TimeSpan.FromMinutes(10);
+    private static Timer? _warmTimer;
+    private static string _warmKey = "";
+    private static long _lastUsedTicks;
+
+    /// <summary>
+    /// Ortak bağlantıyı sıcak tutar: oturum başında ve son çeviriden sonraki <see cref="KeepWarmFor"/> boyunca her
+    /// <see cref="KeepWarmEvery"/>'de bir kullanım sorgusu (<c>/v2/usage</c>; karakter kotasından yemez) gönderir.
+    /// Böylece uzun sessizlikten sonraki ilk replik de açık bağlantıdan gider.
+    /// </summary>
+    private static void KeepWarm(string key)
+    {
+        Volatile.Write(ref _warmKey, key);
+        Interlocked.Exchange(ref _lastUsedTicks, DateTimeOffset.UtcNow.UtcTicks);
+        if (_warmTimer is not null) return;
+        var timer = new Timer(_ =>
+        {
+            var idle = DateTimeOffset.UtcNow.UtcTicks - Interlocked.Read(ref _lastUsedTicks);
+            if (idle > KeepWarmFor.Ticks || Volatile.Read(ref _warmKey) is not { Length: > 0 } warm) return;
+            _ = CheckAsync(warm);
+        }, null, TimeSpan.Zero, KeepWarmEvery);
+        if (Interlocked.CompareExchange(ref _warmTimer, timer, null) is not null) timer.Dispose();
+    }
 
     private readonly string _key;
     private readonly ITextTranslator? _fallback;
@@ -53,6 +91,8 @@ public sealed class DeepLTranslator : ITextTranslator, IOnlineTranslator
         _http = http ?? SharedClient.Value;
         _cache = cache ?? new TranslationCache();
         _glossary = glossary ?? new GlossaryStore(GlossaryStore.UserDirectory);
+        // Gerçek bağlantıyla (testlerin sahte istemcisi değil) çalışırken oturum başında ısınır, oyun boyunca sıcak kalır.
+        if (http is null && _key.Length > 0) KeepWarm(_key);
     }
 
     /// <summary>Son DeepL hatası; çeviri düzgün gidiyorsa null.</summary>
@@ -85,6 +125,7 @@ public sealed class DeepLTranslator : ITextTranslator, IOnlineTranslator
         // Bağlam, bu satırdan önce gösterilenlerdir; satırın kendisi bağlama girmez.
         var context = Context();
         Shown(text);
+        if (_http == SharedClient.Value && _key.Length > 0) Interlocked.Exchange(ref _lastUsedTicks, DateTimeOffset.UtcNow.UtcTicks);
         var glossary = _glossary.Current;
         if (_cache.TryGet(DeepLMarkup.CacheKey(text, glossary), out var cached)) return cached;
         // Hata sonrası beklemede yerel çeviri yoksa (inmemiş, açılamadı) satır düşmesin: DeepL yine denenir. 429 beklemesi kalır.
@@ -110,7 +151,17 @@ public sealed class DeepLTranslator : ITextTranslator, IOnlineTranslator
         string[] translated;
         try
         {
-            var reply = sources.Count == 0 ? [] : await RequestAsync(sources, context, tagged, cancellationToken).ConfigureAwait(false);
+            string[] reply;
+            try
+            {
+                reply = sources.Count == 0 ? [] : await RequestAsync(sources, context, tagged, cancellationToken).ConfigureAwait(false);
+            }
+            catch (HttpRequestException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // Açık tutulan bağlantıyı sunucu sessizce kapatmış olabilir: yeni bağlantıyla hemen bir kez daha denenir,
+                // yedek çeviriye (ve DeepL'in beklemesine) ancak ikinci hata düşürür.
+                reply = await RequestAsync(sources, context, tagged, cancellationToken).ConfigureAwait(false);
+            }
             translated = tagged ? [.. reply.Select(DeepLMarkup.Unwrap)] : reply;
             Report(null);
         }

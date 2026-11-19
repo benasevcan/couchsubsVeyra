@@ -229,11 +229,55 @@ public static class ButtonPrompts
             // eylem fiilinin hemen ardından bağlaç gelir; konuşma cümlesinde bu kalıp bulunmaz.
             if (tokens.Count >= 4 && !SubtitleStabilizer.EndsSentence(line)
                 && (tokens[1].Equals("or", StringComparison.OrdinalIgnoreCase)
-                    || tokens[1].Equals("to", StringComparison.OrdinalIgnoreCase)
                     || tokens[1].Equals("and", StringComparison.OrdinalIgnoreCase)))
                 return true;
         }
-        return false;
+        return IsIconPrompt(tokens, line);
+    }
+
+    private static readonly HashSet<string> Connectors = new(StringComparer.OrdinalIgnoreCase) { "and", "or" };
+
+    /// <summary>Büyük harfle yazılmış kısa İngilizce sözcükler tuş kalıntısı sayılmaz ("HOLD ON TO IT").</summary>
+    private static readonly HashSet<string> ShortWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "on", "up", "it", "in", "at", "out", "off", "me", "us", "him", "her", "my", "an", "the", "you", "its",
+    };
+
+    /// <summary>"to"dan sonra eylem yerine bunlar gelirse konuşmadır ("Hold to your course").</summary>
+    private static readonly HashSet<string> Objects = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "the", "a", "an", "my", "your", "his", "her", "our", "their", "me", "you", "him", "them", "us", "it", "this", "that",
+    };
+
+    /// <summary>
+    /// Tuş simgesinin yazı tanımadaki kalıntısı: harfsiz ("@", "•", "9"), tek karakter ("D", "i"; "a" hariç), tuş adı,
+    /// "and"/"or" ya da büyük harf içeren en çok üç karakter ("LI", "RE", "Rd", "RB").
+    /// </summary>
+    private static bool IsIconRemnant(string token)
+    {
+        if (!token.Any(char.IsLetter) || Buttons.Contains(token) || Lookalikes.Contains(token) || Connectors.Contains(token))
+            return true;
+        if (token.Length == 1) return token != "a";
+        return token.Length <= 3 && token.Any(char.IsUpper) && !ShortWords.Contains(token);
+    }
+
+    /// <summary>
+    /// GTA 6: "Press/Hold/Use ... to ..." ipucunda tuş simgesi resimdir; yazı tanıma onu ya hiç okumaz ("Press  to open
+    /// the map") ya da harf/simge kalıntısı olarak okur ("Press @ to", "Hold I LI to", "Press [RB] to take cover").
+    /// Çevrilince tuş kaybolur ve konuşma yerine ipucu görünür. Fiil ile "to" arasında en çok üç kalıntı olabilir;
+    /// ünlem, soru, tırnak ya da konuşmacı adı (":") taşıyan satır ve "to"dan sonra eylem yerine nesne gelen satır
+    /// ("Hold to your course") konuşma sayılır (Mac: ButtonPrompts.isIconPrompt, Android: isIconPrompt, havuz:
+    /// server/pool/src/prompts.js).
+    /// </summary>
+    private static bool IsIconPrompt(List<string> tokens, string line)
+    {
+        if (line.Any(c => "!?\"“”:".Contains(c))) return false;
+        var all = tokens.SkipWhile(token => !token.Any(char.IsLetter)).ToList();
+        if (all.Count < 3 || !Verbs.Contains(all[0])) return false;
+        var to = all.FindIndex(1, token => token.Equals("to", StringComparison.OrdinalIgnoreCase));
+        if (to < 1 || to > 4 || !all.Skip(1).Take(to - 1).All(IsIconRemnant)) return false;
+        var next = all.Skip(to + 1).FirstOrDefault(token => token.Any(char.IsLetter));
+        return next is not null && all.Count - to - 1 <= 10 && !Objects.Contains(next);
     }
 
     /// <summary>

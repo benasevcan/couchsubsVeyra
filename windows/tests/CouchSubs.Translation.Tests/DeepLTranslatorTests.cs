@@ -84,6 +84,23 @@ public class DeepLTranslatorTests
         Assert.Contains("& run.", result);
     }
 
+    /// <summary>
+    /// Açık tutulan bağlantıyı sunucu sessizce kapatmışsa ilk istek ağ hatası verir; satır yedek çeviriye düşmeden yeni
+    /// bağlantıyla bir kez daha denenir.
+    /// </summary>
+    [Fact]
+    public async Task DroppedKeepAliveConnectionIsRetriedOnce()
+    {
+        var calls = 0;
+        var deepL = new FakeDeepL((request, body) => ++calls == 1 ? throw new HttpRequestException("connection reset") : Echo(request, body));
+        var local = new FakeLocal();
+        var translator = new DeepLTranslator("abc:fx", local, new HttpClient(deepL));
+
+        Assert.Equal("[tr] Open the door.", await translator.TranslateAsync("Open the door."));
+        Assert.Equal(2, deepL.Requests.Count);
+        Assert.Empty(local.Calls);
+    }
+
     [Fact]
     public async Task WithoutGlossaryTermsTheRequestIsPlainText()
     {

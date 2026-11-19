@@ -224,7 +224,8 @@ public static class GameCatalog
             .Concat(found.Where(n => !GameName.Key(n).StartsWith(wanted, StringComparison.Ordinal))).Take(limit)];
     }
 
-    /// <summary>Paket listesinden oyun adları (ortak havuz paketi bir oyun değildir).</summary>
+    /// <summary>Paket listesinden oyun adları (ortak havuz paketi ve asıl paketi olan oyunun "(ek satırlar)" paketi oyun değildir).</summary>
     public static IEnumerable<string> PackGames(IEnumerable<GamePackLibrary.Info> packs) =>
-        packs.Where(p => p.Id != GameSense.GeneralPack).Select(p => p.Title);
+        packs.Where(p => p.Id != GameSense.GeneralPack && !p.Title.EndsWith("(ek satırlar)", StringComparison.Ordinal))
+            .Select(p => p.Title);
 }
