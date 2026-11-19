@@ -1381,6 +1381,11 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             stream.StateChanged += state => post(() => SessionStateChanged(state));
             stream.ConsoleMoved += moved => post(() => ConsoleMoved(moved));
             stream.FrameReceived += HandleFrame;
+            // Okuma hattı meşgulken ve önizleme karesi tazeyken GPU→CPU kare kopyası atlanır (LOH baskısını azaltır).
+            stream.SetFrameFilter(() =>
+                Volatile.Read(ref lastFrame) is null
+                || Environment.TickCount64 - Interlocked.Read(ref lastFrameUiAt) >= 200
+                || (!subtitlesPaused && !frameGate.IsBusy));
             stream.Start();
             session = stream;
 

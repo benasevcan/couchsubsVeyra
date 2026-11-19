@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -205,8 +206,15 @@ public sealed class FreeAreaWindow : Window
             e.Handled = true;
             Close();
         };
+        PropertyChangedEventHandler onControllerChanged = (_, e) =>
+        {
+            if (e.PropertyName == nameof(AppController.IsRunning) && !controller.IsRunning && IsLoaded)
+                Close();
+        };
+        controller.PropertyChanged += onControllerChanged;
         Closed += (_, _) =>
         {
+            controller.PropertyChanged -= onControllerChanged;
             current = null;
             Keyboard.ClearFocus();
         };

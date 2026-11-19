@@ -23,6 +23,7 @@ internal sealed class Ct2MarianEngine : ISentenceEngine
     private Process worker;
     private bool gpuActive;
     private bool gpuAttempted;
+    private bool needsRestart;
     private bool disposed;
 
     internal bool GpuActive => gpuActive;
@@ -102,6 +103,12 @@ internal sealed class Ct2MarianEngine : ISentenceEngine
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         cancellationToken.ThrowIfCancellationRequested();
+        if (needsRestart)
+        {
+            Stop(worker);
+            worker = Start(gpuActive ? "cuda" : "cpu");
+            needsRestart = false;
+        }
         if (!gpuAttempted && cudaReady is { IsCompleted: true })
         {
             gpuAttempted = true;
@@ -146,7 +153,18 @@ internal sealed class Ct2MarianEngine : ISentenceEngine
         var request = JsonSerializer.Serialize(new { tokens, beams, max_output = Math.Min(maxOutputTokens, 2 * tokens.Length + 16) });
         worker.StandardInput.WriteLine(request);
         worker.StandardInput.Flush();
-        var line = worker.StandardOutput.ReadLine() ?? throw new IOException("CTranslate2 worker exited during translation");
+        string? line;
+        try
+        {
+            line = worker.StandardOutput.ReadLineAsync(cancellationToken).AsTask().GetAwaiter().GetResult();
+        }
+        catch (OperationCanceledException)
+        {
+            // İptal sırasında stdout'ta gecikmeli yanıt kalıp sonraki satırla kaymasın diye alt süreç yenilenir.
+            needsRestart = true;
+            throw;
+        }
+        if (line is null) throw new IOException("CTranslate2 worker exited during translation");
         using var response = JsonDocument.Parse(line);
         // Tek satırın hatası (süreç ayakta): yalnız o satır çevrilemez, motor kapatılmaz. IOException yalnız
         // sürecin kapandığını bildirir; MarianTranslator onu kalıcı motor hatası sayar.

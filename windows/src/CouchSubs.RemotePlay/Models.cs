@@ -132,4 +132,6 @@ public interface IStreamSession : IDisposable
     void Stop();
     /// <summary>Bilgisayar uykudan uyandığında ya da ağ değiştiğinde çağrılır.</summary>
     void ReconnectNow();
+    /// <summary>İsteğe bağlı kare filtresi: false dönerse GPU→CPU kare kopyası atlanır.</summary>
+    void SetFrameFilter(Func<bool>? shouldCapture) { }
 }

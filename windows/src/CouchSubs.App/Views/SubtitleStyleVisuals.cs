@@ -40,11 +40,18 @@ internal static class SubtitleStyleVisuals
         _ => Colors.White,
     };
 
+    public static SolidColorBrush FrozenBrush(Color color)
+    {
+        var brush = new SolidColorBrush(color);
+        brush.Freeze();
+        return brush;
+    }
+
     public static SolidColorBrush ResolveTextBrush(SubtitleStyle style, double opacity = 1.0)
     {
         var color = ResolveTextColor(style);
         if (opacity < 1.0) color.A = (byte)Math.Round(Math.Clamp(opacity, 0.0, 1.0) * 255);
-        return new SolidColorBrush(color);
+        return FrozenBrush(color);
     }
 
     public static Color ResolveBackgroundColor(SubtitleStyle style, byte alpha)
@@ -91,9 +98,9 @@ internal static class SubtitleStyleVisuals
 
     public static (Brush? Brush, Thickness Thickness) ResolveBorder(SubtitleBorderStyle borderStyle, double scale) => borderStyle switch
     {
-        SubtitleBorderStyle.Subtle => (new SolidColorBrush(Color.FromArgb(0x66, 0xFF, 0xFF, 0xFF)), new Thickness(Math.Max(1, 1.2 * scale))),
-        SubtitleBorderStyle.Accent => (new SolidColorBrush(Color.FromRgb(0xFF, 0xC8, 0x3D)), new Thickness(Math.Max(1, 1.8 * scale))),
-        SubtitleBorderStyle.White => (new SolidColorBrush(Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF)), new Thickness(Math.Max(1, 1.8 * scale))),
+        SubtitleBorderStyle.Subtle => (FrozenBrush(Color.FromArgb(0x66, 0xFF, 0xFF, 0xFF)), new Thickness(Math.Max(1, 1.2 * scale))),
+        SubtitleBorderStyle.Accent => (FrozenBrush(Color.FromRgb(0xFF, 0xC8, 0x3D)), new Thickness(Math.Max(1, 1.8 * scale))),
+        SubtitleBorderStyle.White => (FrozenBrush(Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF)), new Thickness(Math.Max(1, 1.8 * scale))),
         _ => (null, new Thickness(0)),
     };
 

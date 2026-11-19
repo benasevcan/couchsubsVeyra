@@ -307,7 +307,7 @@ public sealed partial class SubtitleOverlayWindow : Window
         };
         return new Border
         {
-            Background = new SolidColorBrush(SubtitleStyleVisuals.ResolveBackgroundColor(style, (byte)Math.Round(alpha * 255))),
+            Background = SubtitleStyleVisuals.FrozenBrush(SubtitleStyleVisuals.ResolveBackgroundColor(style, (byte)Math.Round(alpha * 255))),
             BorderBrush = borderBrush,
             BorderThickness = borderThickness,
             CornerRadius = new CornerRadius(SubtitleStyleVisuals.ResolveCornerRadius(style, band, scale)),
@@ -331,7 +331,7 @@ public sealed partial class SubtitleOverlayWindow : Window
         var (borderBrush, borderThickness) = SubtitleStyleVisuals.ResolveBorder(style.BorderStyle, scale * 0.75);
         return new Border
         {
-            Background = new SolidColorBrush(SubtitleStyleVisuals.ResolveBackgroundColor(style, 0xD9)),
+            Background = SubtitleStyleVisuals.FrozenBrush(SubtitleStyleVisuals.ResolveBackgroundColor(style, 0xD9)),
             BorderBrush = borderBrush,
             BorderThickness = borderThickness,
             CornerRadius = new CornerRadius(SubtitleStyleVisuals.ResolveCornerRadius(style, fullWidthBand: false, scale * 0.8)),

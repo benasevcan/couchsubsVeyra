@@ -57,6 +57,7 @@ public sealed class RemotePlayWindowStream : IStreamSession
     internal static IntPtr ActiveWindow => Volatile.Read(ref activeWindow);
     private int generation;
     private bool running;
+    private volatile Func<bool>? frameFilter;
     private CancellationTokenSource? search;
     private Capture? capture;
     private SessionState? reported;
@@ -123,6 +124,8 @@ public sealed class RemotePlayWindowStream : IStreamSession
     }
 
     public void Dispose() => Stop();
+
+    public void SetFrameFilter(Func<bool>? shouldCapture) => frameFilter = shouldCapture;
 
     private bool IsCurrent(int number)
     {
@@ -467,13 +470,14 @@ public sealed class RemotePlayWindowStream : IStreamSession
         private readonly Direct3D11CaptureFramePool pool;
         private readonly GraphicsCaptureSession session;
         private readonly Stopwatch clock = Stopwatch.StartNew();
+        private readonly object captureLock = new();
         private long lastFrameMs = -1000;
         private int busy;
         private long? blackSinceMs;
         private bool seenContent;
         private bool warnedBlack;
         private Windows.Graphics.SizeInt32 size;
-        private bool disposed;
+        private volatile bool disposed;
 
         public string Name { get; }
         public IntPtr Window => window;
@@ -543,34 +547,54 @@ public sealed class RemotePlayWindowStream : IStreamSession
 
         private void OnFrameArrived(Direct3D11CaptureFramePool sender, object args)
         {
+            if (disposed) return;
             using var frame = sender.TryGetNextFrame();
             if (frame is null || disposed) return;
+            var now = clock.ElapsedMilliseconds;
             if (frame.ContentSize.Width != size.Width || frame.ContentSize.Height != size.Height)
             {
                 // Pencere büyütüldü ya da tam ekrana geçti: havuz yeni boya kurulur, bu kare atlanır.
-                size = frame.ContentSize;
-                if (size.Width > 0 && size.Height > 0) pool.Recreate(device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, size);
+                lock (captureLock)
+                {
+                    if (disposed) return;
+                    size = frame.ContentSize;
+                    if (size.Width > 0 && size.Height > 0)
+                    {
+                        try { pool.Recreate(device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, size); }
+                        catch (Exception error)
+                        {
+                            RemotePlayLog.Note($"Remote Play yakalama havuzu yenilenemedi: {error.GetType().Name}: {error.Message}");
+                        }
+                    }
+                }
                 return;
             }
-            var now = clock.ElapsedMilliseconds;
             var fps = LowLatencyCapture ? LowLatencyFramesPerSecond : DefaultFramesPerSecond;
             if (now - lastFrameMs < 1000 / fps) return;
+            if (owner.frameFilter is { } filter && !filter()) return;
             // Önceki kare hâlâ kopyalanıyorsa bu kare atlanır.
             if (Interlocked.Exchange(ref busy, 1) == 1) return;
             lastFrameMs = now;
+            Frame? captured = null;
             try
             {
-                var captured = staging.TryCopySurface(frame.Surface, size.Width, size.Height);
-                if (captured is null)
+                lock (captureLock)
                 {
-                    using var bitmap = SoftwareBitmap.CreateCopyFromSurfaceAsync(frame.Surface, BitmapAlphaMode.Premultiplied).AsTask().GetAwaiter().GetResult();
-                    var (width, height) = (bitmap.PixelWidth, bitmap.PixelHeight);
-                    if (width < 2 || height < 2) return;
-                    var pixels = new byte[width * height * 4];
-                    bitmap.CopyToBuffer(pixels.AsBuffer());
-                    captured = new Frame(pixels, width, height, width * 4);
+                    if (disposed) return;
+                    captured = staging.TryCopySurface(frame.Surface, size.Width, size.Height);
+                    if (captured is null)
+                    {
+                        using var bitmap = SoftwareBitmap.CreateCopyFromSurfaceAsync(frame.Surface, BitmapAlphaMode.Premultiplied).AsTask().GetAwaiter().GetResult();
+                        var (width, height) = (bitmap.PixelWidth, bitmap.PixelHeight);
+                        if (width >= 2 && height >= 2)
+                        {
+                            var pixels = new byte[width * height * 4];
+                            bitmap.CopyToBuffer(pixels.AsBuffer());
+                            captured = new Frame(pixels, width, height, width * 4);
+                        }
+                    }
                 }
-                if (captured.Width < 2 || captured.Height < 2) return;
+                if (captured is null || captured.Width < 2 || captured.Height < 2 || disposed) return;
                 CheckBlack(captured.Pixels, now);
                 owner.Deliver(captured);
             }
@@ -616,11 +640,16 @@ public sealed class RemotePlayWindowStream : IStreamSession
         public void Dispose()
         {
             if (disposed) return;
-            disposed = true;
-            try { session.Dispose(); } catch (Exception) { }
-            try { pool.Dispose(); } catch (Exception) { }
-            try { staging.Dispose(); } catch (Exception) { }
-            try { device.Dispose(); } catch (Exception) { }
+            try { pool.FrameArrived -= OnFrameArrived; } catch (Exception) { }
+            lock (captureLock)
+            {
+                if (disposed) return;
+                disposed = true;
+                try { session.Dispose(); } catch (Exception) { }
+                try { pool.Dispose(); } catch (Exception) { }
+                try { staging.Dispose(); } catch (Exception) { }
+                try { device.Dispose(); } catch (Exception) { }
+            }
         }
     }
 
@@ -712,9 +741,12 @@ public sealed class RemotePlayWindowStream : IStreamSession
             private const uint D3D11CpuAccessRead = 0x20000;
             private const uint D3D11MapRead = 1;
 
+            private const int MaxConsecutiveFailures = 5;
+
             private IntPtr staging;
             private int stagingWidth;
             private int stagingHeight;
+            private int consecutiveFailures;
             private bool fallbackOnly;
             private bool disposed;
 
@@ -733,11 +765,14 @@ public sealed class RemotePlayWindowStream : IStreamSession
                     var texIid = Texture2DIid;
                     var getInterface = (delegate* unmanaged[Stdcall]<IntPtr, Guid*, out IntPtr, int>)(*(IntPtr**)access)[3];
                     if (getInterface(access, &texIid, out srcTex) < 0 || srcTex == IntPtr.Zero) return null;
-                    return CopyTexture(srcTex, width, height);
+                    var frame = CopyTexture(srcTex, width, height);
+                    if (frame is not null) consecutiveFailures = 0;
+                    else NoteFailure();
+                    return frame;
                 }
                 catch
                 {
-                    fallbackOnly = true;
+                    NoteFailure();
                     return null;
                 }
                 finally
@@ -747,14 +782,27 @@ public sealed class RemotePlayWindowStream : IStreamSession
                 }
             }
 
+            private void NoteFailure()
+            {
+                ReleaseStaging();
+                if (++consecutiveFailures >= MaxConsecutiveFailures) fallbackOnly = true;
+            }
+
+            private void ReleaseStaging()
+            {
+                if (staging != IntPtr.Zero)
+                {
+                    Marshal.Release(staging);
+                    staging = IntPtr.Zero;
+                    stagingWidth = 0;
+                    stagingHeight = 0;
+                }
+            }
+
             internal Frame? CopyTexture(IntPtr srcTexture, int width, int height)
             {
                 if (disposed || fallbackOnly || srcTexture == IntPtr.Zero || width < 2 || height < 2) return null;
-                if (!EnsureStaging(width, height))
-                {
-                    fallbackOnly = true;
-                    return null;
-                }
+                if (!EnsureStaging(width, height)) return null;
                 var ctxVtbl = *(IntPtr**)context;
                 // ID3D11DeviceContext::CopyResource (slot 47)
                 var copyResource = (delegate* unmanaged[Stdcall]<IntPtr, IntPtr, IntPtr, void>)ctxVtbl[47];

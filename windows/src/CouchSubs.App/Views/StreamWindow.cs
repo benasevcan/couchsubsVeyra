@@ -261,7 +261,7 @@ public sealed class StreamWindow : Window
         return new Border
         {
             Background = boxed
-                ? new SolidColorBrush(SubtitleStyleVisuals.ResolveBackgroundColor(style, 255))
+                ? SubtitleStyleVisuals.FrozenBrush(SubtitleStyleVisuals.ResolveBackgroundColor(style, 255))
                 : Brushes.Transparent,
             BorderBrush = borderBrush,
             BorderThickness = borderThickness,
@@ -285,7 +285,7 @@ public sealed class StreamWindow : Window
         var (borderBrush, borderThickness) = SubtitleStyleVisuals.ResolveBorder(style.BorderStyle, scale * 0.75);
         return new Border
         {
-            Background = new SolidColorBrush(SubtitleStyleVisuals.ResolveBackgroundColor(style, 255)),
+            Background = SubtitleStyleVisuals.FrozenBrush(SubtitleStyleVisuals.ResolveBackgroundColor(style, 255)),
             BorderBrush = borderBrush,
             BorderThickness = borderThickness,
             CornerRadius = new CornerRadius(SubtitleStyleVisuals.ResolveCornerRadius(style, fullWidthBand: false, scale * 0.8)),
