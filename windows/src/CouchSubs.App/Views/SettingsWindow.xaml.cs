@@ -122,6 +122,7 @@ public partial class SettingsWindow : Window
             ?? CpuThreadChoice.Items[0];
         LowLatencyMode.IsChecked = settings.LowLatencyMode;
         FastSubtitleDetection.IsChecked = settings.FastSubtitleDetection;
+        WatchSubtitleBackground.IsChecked = settings.WatchSubtitleBackground;
         SelectByTag(OcrEngineChoice, settings.OcrEngine.ToString());
         ShowAdvancedOcr();
         ShowCpuThreads();
@@ -796,6 +797,9 @@ public partial class SettingsWindow : Window
 
     private void OnFastSubtitleDetection(object sender, RoutedEventArgs e) =>
         Update(s => s with { FastSubtitleDetection = FastSubtitleDetection.IsChecked == true });
+
+    private void OnWatchSubtitleBackground(object sender, RoutedEventArgs e) =>
+        Update(s => s with { WatchSubtitleBackground = WatchSubtitleBackground.IsChecked == true });
 
     private async void OnKeySave(object sender, RoutedEventArgs e)
     {

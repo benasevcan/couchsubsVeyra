@@ -250,6 +250,8 @@ public sealed record UserSettings
     public int CpuTranslationThreads { get; init; } = CpuThreadOptions.Default;
     /// <summary>Değişmeyen altyazı bölgesinde tam OCR okumasını en fazla iki kare yeniden kullan.</summary>
     public bool FastSubtitleDetection { get; init; }
+    /// <summary>Yalnız GTA 6'nın lacivert altyazı zemini üstündeki yazıyı oku. Varsayılan kapalı.</summary>
+    public bool WatchSubtitleBackground { get; init; }
     /// <summary>Düşük gecikme modu: 25 FPS pencere yakalama, hızlı OCR sınırı, 1. karede gösterim ve sıfır yarım-satır beklemesi.</summary>
     public bool LowLatencyMode { get; init; } = true;
     /// <summary>Altyazı okuyucusu. Gelişmiş seçili ama modeli inmemişse Windows'unki kullanılır.</summary>

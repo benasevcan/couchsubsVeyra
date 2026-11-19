@@ -148,6 +148,8 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
     /// Uygulama hedef dil Türkçe değilse kapatır.
     /// </summary>
     public bool SkipsTurkish { get; set; } = true;
+    /// <summary>Yalnız GTA 6 altyazı renginin üstündeki OCR satırlarını oku.</summary>
+    public bool WatchSubtitleBackground { get; set; }
 
     /// <summary>Paket önce adlı satırla, bulunmazsa adsız cümleyle aranır (paket anahtarları çoğu zaman adsızdır).</summary>
     private PackMatch? FindPack(string source)
@@ -215,6 +217,7 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
                 }
                 var readStarted = now();
                 var read = reader.ReadLines(area, plan.Deep);
+                if (WatchSubtitleBackground) read = SubtitleBackground.Filter(read, area);
                 var readMs = (int)Math.Clamp(now() - readStarted, 0, int.MaxValue);
                 lock (gate)
                 {

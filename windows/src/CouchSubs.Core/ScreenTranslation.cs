@@ -22,7 +22,10 @@ public static class ScreenTranslation
         public bool Paragraphs => Translation.Contains('\n');
     }
 
-    /// <summary>Kalabalık ekranda TV'yi kutuyla doldurmamak ve çeviriyi uzatmamak için en çok bu kadar grup çevrilir.</summary>
+    /// <summary>
+    /// Kalabalık ekranda TV'yi kutuyla doldurmamak ve çeviriyi uzatmamak için en çok bu kadar grup çevrilir; fazlası
+    /// olunca en az yazısı olanlar (tek sözcüklük etiketler) bırakılır.
+    /// </summary>
     public const int MaxGroups = 30;
 
     /// <summary>
@@ -99,7 +102,8 @@ public static class ScreenTranslation
     /// <summary>
     /// Satırları gruplara toplar. Kumanda ipuçları ve yazı tanıma çöpleri atılır; harfi olmayan ya da tek harfli
     /// satırlar ("23m", "9", "+") göstergedir, çevrilmez. Bir satır, üstündeki satırın hemen altındaysa, yatayda onunla
-    /// üst üste biniyorsa ve yazı boyu benziyorsa o gruba katılır. Gruplar yukarıdan aşağı, en çok <see cref="MaxGroups"/>.
+    /// üst üste biniyorsa ve yazı boyu benziyorsa o gruba katılır; küçük harfle başlayan satır üstteki bitmemiş cümleye
+    /// katılır (<see cref="Continues"/>). Gruplar yukarıdan aşağı; en çok <see cref="MaxGroups"/>, en çok yazısı olanlar.
     /// </summary>
     public static IReadOnlyList<Group> Groups(Reading reading)
     {
@@ -114,15 +118,47 @@ public static class ScreenTranslation
             // İki bağımsız sütuna değen geniş başlık/alt satır, sütunlardan birinin parçası değildir.
             if (index >= 0 && (BridgesColumns(groups[index][^1].Box!.Value, line.Box!.Value, lines)
                 || BridgesColumns(line.Box!.Value, groups[index][^1].Box!.Value, lines))) index = -1;
+            // Küçük harfle başlayan satır, üstündeki bitmemiş cümlenin devamıdır: satır aralığı biraz geniş ya da yanında
+            // başka bir yazı olsa da o gruba katılır. Ayrı grup olunca yarım cümle tek başına çevriliyor (yapay zekâ
+            // boş/aynı döndürüyor) ya da grup sınırına takılıp hiç çevrilmiyordu; bilgi kutusunun son satırı İngilizce kalıyordu.
+            if (index < 0) index = groups.FindLastIndex(group => Continues(line, group[^1]));
             if (index >= 0) groups[index].Add(line);
             else groups.Add([line]);
         }
-        return [.. groups.Take(MaxGroups).Select(group =>
+        return [.. Busiest(groups).Select(group =>
         {
             var heights = group.Select(line => line.Box!.Value.Bottom - line.Box!.Value.Top).OrderBy(value => value).ToList();
             var box = group.Select(line => line.Box!.Value).Aggregate((a, b) => a.Union(b));
             return new Group(Paragraphs(group), box, heights[heights.Count / 2]);
         })];
+    }
+
+    /// <summary>
+    /// Kalabalık ekranda en çok yazısı olan <see cref="MaxGroups"/> grup, yukarıdan aşağı sırasıyla. Önceden en üstteki
+    /// gruplar alınıyordu: menü ve gösterge etiketleri sınırı doldurunca ekranın alt yarısındaki bilgi kutusu ve
+    /// açıklamalar hiç çevrilmiyordu ("Ekranı çevir yazıların yarısını çeviriyor").
+    /// </summary>
+    private static IEnumerable<List<TextLine>> Busiest(List<List<TextLine>> groups) =>
+        groups.Count <= MaxGroups ? groups
+            : groups.Select((group, index) => (Group: group, Index: index, Letters: group.Sum(line => line.Text.Count(char.IsLetter))))
+                .OrderByDescending(entry => entry.Letters).ThenBy(entry => entry.Index)
+                .Take(MaxGroups).OrderBy(entry => entry.Index).Select(entry => entry.Group);
+
+    /// <summary>
+    /// Alt satır, üstteki satırın bitmemiş cümlesini sürdürüyor: küçük harfle başlıyor, üstteki cümle sonu işaretiyle
+    /// bitmiyor, yazı boyu benzer, yatayda üst üste ve arada satır yüksekliğinin bir buçuk katından az boşluk var.
+    /// </summary>
+    private static bool Continues(TextLine lower, TextLine upper)
+    {
+        var first = lower.Text.FirstOrDefault(char.IsLetter);
+        if (!char.IsLower(first) || SubtitleStabilizer.EndsSentence(upper.Text.Trim())) return false;
+        TextBox below = lower.Box!.Value, above = upper.Box!.Value;
+        double a = above.Bottom - above.Top, b = below.Bottom - below.Top;
+        if (Math.Max(a, b) > Math.Min(a, b) * 1.6) return false;
+        if (below.Top - above.Bottom >= Math.Max(a, b) * 1.5 || below.Top < above.Top) return false;
+        var overlap = Math.Min(below.Right, above.Right) - Math.Max(below.Left, above.Left);
+        var narrower = Math.Min(below.Right - below.Left, above.Right - above.Left);
+        return overlap > 0 && overlap >= narrower * 0.5;
     }
 
     // Geniş kutu, yan yana duran iki ayrı satırı birbirine bağlamasın. Yalnız filtrelenmiş OCR satırları kullanılır.

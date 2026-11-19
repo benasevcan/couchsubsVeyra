@@ -438,6 +438,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             if (translationChanged && !isRunning) RefreshTranslatorStatus();
             if (isRunning && (old.SourceLanguage != value.SourceLanguage || old.TargetLanguage != value.TargetLanguage
                               || translationChanged || old.FastSubtitleDetection != value.FastSubtitleDetection
+                              || old.WatchSubtitleBackground != value.WatchSubtitleBackground
                               || old.LowLatencyMode != value.LowLatencyMode
                               || old.OcrEngine != value.OcrEngine))
             {
@@ -2006,6 +2007,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         {
             ShowSpeakerNames = settings.ShowSpeakerNames,
             SkipsTurkish = settings.TargetLanguage == "tr",
+            WatchSubtitleBackground = settings.WatchSubtitleBackground,
         };
         built.MetricsReady += metrics => post(() => MetricsText = metrics.Summary(text));
         built.PairShown += (source, translation) =>
