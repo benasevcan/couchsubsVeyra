@@ -104,7 +104,8 @@ public static class OverlayPlacement
         var work = workArea.IsUsable ? workArea : Fallback;
         if (!hasBackground || adjusting) return new CoverLayout(baseWindow, 0, 0);
         var fullH = double.IsFinite(screenHeight) && screenHeight > 0 ? screenHeight : work.Height;
-        var coverHeight = sourceBox is { } s ? Math.Clamp(s.Bottom - s.Top + 0.016, 0, 0.35) * fullH : 0;
+        // Birden fazla ayrı yazı (ör. konuşma + görev satırı) aynı kutuda birleşse bile siyah zemin ekrana taşmasın.
+        var coverHeight = sourceBox is { } s ? Math.Clamp(s.Bottom - s.Top + 0.016, 0, 0.10) * fullH : 0;
         if (isBand) return new CoverLayout(new OverlayBounds(work.Left, baseWindow.Top, work.Width), 0, Math.Round(coverHeight));
         if (sourceBox is not { } box) return new CoverLayout(baseWindow, 0, 0);
 

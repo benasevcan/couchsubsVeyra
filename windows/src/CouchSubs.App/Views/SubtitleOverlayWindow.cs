@@ -246,7 +246,7 @@ public sealed partial class SubtitleOverlayWindow : Window
             if (line.Role == SubtitleStack.Role.Current)
             {
                 box.MinWidth = cover.MinBoxWidth;
-                box.MinHeight = cover.MinBoxHeight;
+                box.MinHeight = EffectiveMinHeight(box, cover.MinBoxHeight);
             }
             if (line.Fading && box.Tag is not "fading")
             {
@@ -305,7 +305,7 @@ public sealed partial class SubtitleOverlayWindow : Window
             LineHeight = size * SubtitleStyleVisuals.ResolveLineHeightFactor(style.LineSpacing),
             Effect = SubtitleStyleVisuals.ResolveShadowEffect(style.ShadowStrength, scale),
         };
-        return new Border
+        var box = new Border
         {
             Background = SubtitleStyleVisuals.FrozenBrush(SubtitleStyleVisuals.ResolveBackgroundColor(style, (byte)Math.Round(alpha * 255))),
             BorderBrush = borderBrush,
@@ -314,11 +314,25 @@ public sealed partial class SubtitleOverlayWindow : Window
             Padding = padding,
             Margin = new Thickness(band ? -24 * scale : 0, 7 * scale, band ? -24 * scale : 0, 7 * scale),
             MinWidth = current ? cover.MinBoxWidth : 0,
-            MinHeight = current ? cover.MinBoxHeight : 0,
             HorizontalAlignment = band ? HorizontalAlignment.Stretch : SubtitleStyleVisuals.ResolveHorizontalAlignment(style.HorizontalAlign),
             Opacity = 1,
             Child = text,
         };
+        if (current) box.MinHeight = EffectiveMinHeight(box, cover.MinBoxHeight);
+        return box;
+    }
+
+    /// <summary>
+    /// Kaynak kutuyu örtmek için verilen en az yüksekliği, çeviri metninin kendi satır sayısına göre makul bir tavanla
+    /// sınırlar; böylece tek satırlık çeviri iki ayrı oyuniçi yazının birleşmiş yüksekliği yüzünden şişmez.
+    /// </summary>
+    private static double EffectiveMinHeight(Border box, double coverMinHeight)
+    {
+        if (coverMinHeight <= 0 || box.Child is not TextBlock text) return 0;
+        var lineCount = Math.Max(1, text.Text.Count(c => c == '\n') + 1);
+        var lineHeight = double.IsFinite(text.LineHeight) && text.LineHeight > 0 ? text.LineHeight : text.FontSize * 1.25;
+        var cap = lineCount * lineHeight + box.Padding.Top + box.Padding.Bottom + box.BorderThickness.Top + box.BorderThickness.Bottom + lineHeight * 0.4;
+        return Math.Min(coverMinHeight, Math.Round(cap));
     }
 
     /// <summary>Ek alanın çevirisi: altyazıdan küçük, koyu zeminli kutu; oyundaki yazının bulunduğu yana yaslı.</summary>

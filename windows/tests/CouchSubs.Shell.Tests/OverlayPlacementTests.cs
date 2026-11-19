@@ -180,4 +180,16 @@ public class OverlayPlacementTests
         Assert.Equal(Work.Left, band.Window.Left);
         Assert.Equal(Work.Width, band.Window.Width);
     }
+
+    [Fact]
+    public void CoverForSourceCapsExcessiveMergedSourceHeight()
+    {
+        var bottomWin = OverlayPlacement.AnchoredPlace(Work, Height, CouchSubs.Core.SubtitleAnchor.Bottom, 4, 70, CouchSubs.Core.SubtitleHorizontalAlign.Center);
+        var merged = OverlayPlacement.CoverForSource(
+            Work, 1080, bottomWin, Height,
+            new CouchSubs.Core.TextBox(0.15, 0.72, 0.85, 0.95),
+            CouchSubs.Core.SubtitleHorizontalAlign.Center,
+            isBand: false, hasBackground: true, adjusting: false, sidePadding: 24);
+        Assert.Equal(Math.Round(0.10 * 1080), merged.MinBoxHeight);
+    }
 }
