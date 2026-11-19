@@ -164,12 +164,22 @@ public class SubtitleBlockTests
     public void LongControllerHintBelowSubtitleDoesNotHideDialogue()
     {
         Assert.True(ButtonPrompts.IsPrompt("Hold L2 or R2 and aim around until you locate a signal"));
+        Assert.True(ButtonPrompts.IsPrompt("Hold 2 or R2 and aim around until you locate a signal"));
+        Assert.True(ButtonPrompts.IsPrompt("Hold 2 or 2 and aim around until you locate a signal"));
+        Assert.True(ButtonPrompts.IsPrompt("Hold 2 or and aim around until you locate a signal"));
         Assert.True(ButtonPrompts.IsPrompt("Hold or and aim around until you locate a signal"));
+        Assert.True(ButtonPrompts.IsPrompt("Hold and aim around until you locate a signal"));
         Assert.False(ButtonPrompts.IsPrompt("Hold on, I'm coming!"));
-        var reading = new Reading([
-            Line("I had to put it in time-out", 0.35, 0.65, 0.65),
-            Line("Hold or and aim around until you locate a signal", 0.25, 0.90, 0.75),
+        Assert.False(ButtonPrompts.IsPrompt("Hold on and wait for me"));
+        Assert.False(ButtonPrompts.IsPrompt("Hold up and listen to me"));
+        Assert.False(ButtonPrompts.IsPrompt("Hold it and don't move"));
+        Assert.False(ButtonPrompts.IsPrompt("Use and abuse"));
+
+        var splitPrompt = new Reading([
+            new TextLine("Hell yeah... and Beth, too.", new TextBox(0.32, 0.72, 0.68, 0.79)),
+            new TextLine("Hold", new TextBox(0.10, 0.90, 0.16, 0.96)),
+            new TextLine("and aim around until you locate a signal", new TextBox(0.30, 0.90, 0.88, 0.96)),
         ]);
-        Assert.Equal("I had to put it in time-out", reading.WithoutButtonPrompts().SubtitleBlock(Area).Text);
+        Assert.Equal("Hell yeah... and Beth, too.", splitPrompt.JoiningRows().WithoutButtonPrompts().SubtitleBlock(Area).Text);
     }
 }

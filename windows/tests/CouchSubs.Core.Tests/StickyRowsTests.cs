@@ -74,4 +74,25 @@ public class StickyRowsTests
         Assert.True(clearsWhileObjectiveAlone > 0);
         Assert.Equal(new[] { Objective, "Yeah!\n" + Objective, "Okay." }, translator.Requested);
     }
+
+    [Fact]
+    public void NotedPromptSuppressesFlickerFragmentsAndExpiresWhenGone()
+    {
+        var rows = new StickyRows();
+        const string prompt = "Hold 2 or R2 and aim around until you locate a signal";
+        const string dialogue = "Hell yeah... and Beth, too.";
+
+        rows.NotePrompt(prompt, 0);
+        // Tek satırlık parça ya da diyaloğun altındaki eksik parça bastırılır, diyalog kalır.
+        Assert.Equal("", rows.Filter(Reading.FromText("and aim around until you locate a signal"), 100).Text);
+        Assert.Equal(dialogue, rows.Filter(new Reading([
+            new TextLine(dialogue, new TextBox(0.3, 0.7, 0.7, 0.78)),
+            new TextLine("Hold aim around until you locate a signal", new TextBox(0.25, 0.88, 0.75, 0.95)),
+        ]), 200).Text);
+
+        // İpucu ForgetAfterMs'den uzun süre görünmeyince unutulur.
+        Assert.Equal("", rows.Filter(Reading.Empty, 2000).Text);
+        Assert.Equal("and aim around until you locate a signal",
+            rows.Filter(Reading.FromText("and aim around until you locate a signal"), 2100).Text);
+    }
 }

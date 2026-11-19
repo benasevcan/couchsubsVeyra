@@ -33,6 +33,22 @@ public sealed class StickyRows
     /// <summary>Son <see cref="Filter"/> çağrısında ilk kez sabit sayılan satırlar (günlük için).</summary>
     public IReadOnlyList<string> NewlySticky { get; private set; } = [];
 
+    /// <summary>Tuş ipucu olarak atılan uzun satırı hatırlar; sonraki karede kırpık parçası gelirse o da bastırılır.</summary>
+    public void NotePrompt(string line, long time)
+    {
+        var text = TextMatch.Normalize(line);
+        if (text.Length < 10) return;
+        var existing = rows.FirstOrDefault(r => TextMatch.IsSimilar(text, r.Text) || IsFragmentOf(text, r.Text));
+        if (existing is not null)
+        {
+            existing.Sticky = true;
+            existing.LastSeen = time;
+            if (text.Length <= existing.Text.Length) return;
+            rows.Remove(existing);
+        }
+        rows.Add(new Row(text, time) { Sticky = true, LastSeen = time });
+    }
+
     /// <summary>Okumanın sabit (HUD) satırları çıkarılmış hali. <paramref name="time"/>: milisaniye saati.</summary>
     public Reading Filter(Reading reading, long time)
     {
@@ -43,7 +59,8 @@ public sealed class StickyRows
         {
             var text = TextMatch.Normalize(line.Text);
             if (text.Length < 3) { matched.Add(null); continue; }
-            var row = rows.FirstOrDefault(r => !used.Contains(r) && TextMatch.IsSimilar(text, r.Text));
+            var row = rows.FirstOrDefault(r => !used.Contains(r) && TextMatch.IsSimilar(text, r.Text))
+                ?? rows.FirstOrDefault(r => !used.Contains(r) && r.Sticky && IsFragmentOf(text, r.Text));
             if (row is null) { row = new Row(text, time); rows.Add(row); }
             row.LastSeen = time;
             used.Add(row);
@@ -63,6 +80,22 @@ public sealed class StickyRows
         var kept = reading.Lines.Where((_, i) => matched[i] is not { Sticky: true }).ToList();
         rows.RemoveAll(r => time - r.LastSeen > ForgetAfterMs);
         return kept.Count == reading.Lines.Count ? reading : new Reading(kept);
+    }
+
+    private static bool IsFragmentOf(string fragment, string full)
+    {
+        if (fragment.Length < 10 || full.Length < 10) return false;
+        if (full.Contains(fragment, StringComparison.Ordinal) || fragment.Contains(full, StringComparison.Ordinal))
+            return true;
+        var fragWords = fragment.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (fragWords.Length < 3) return false;
+        var fullWords = full.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var j = 0;
+        foreach (var word in fullWords)
+        {
+            if (word == fragWords[j] && ++j == fragWords.Length) return true;
+        }
+        return false;
     }
 
     public void Reset()

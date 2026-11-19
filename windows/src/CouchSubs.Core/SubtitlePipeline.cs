@@ -238,11 +238,22 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
         // Yazı tanımanın uydurduğu sözcük çöpleri ("ou$3e") de çevirmene gitmez.
         // Alandaki menü ve köşe göstergeleri de altyazı değildir; yalnız altyazı bloğu çevrilir ve kutusu ona göre olur.
         var area = new TextBox(region.Left, region.Top, region.Right, region.Bottom);
-        // Konuşma değişirken sabit duran görev/HUD satırı ("Get in the sea plane", GTA 6) altyazı bloğuna katılmaz.
-        var rows = raw.WithoutButtonPrompts().WithoutOcrNoise().JoiningRows();
+        // Satır parçaları önce birleştirilir (yoksa "Hold / R2 / or / and aim..." ayrı kutulara bölünüp ipucu filtresinden kaçar),
+        // ardından tuş ipuçları ve konuşma değişirken sabit duran görev/HUD satırları ayıklanır.
+        var joined = raw.JoiningRows().WithoutOcrNoise();
+        var kept = new List<TextLine>(joined.Lines.Count);
+        var prompts = new List<string>();
+        foreach (var line in joined.Lines)
+        {
+            if (ButtonPrompts.IsPrompt(line.Text)) prompts.Add(line.Text);
+            else kept.Add(line);
+        }
+        var rows = prompts.Count == 0 ? joined : new Reading(kept);
         lock (gate)
         {
-            rows = stickyRows.Filter(rows, now());
+            var t = now();
+            foreach (var prompt in prompts) stickyRows.NotePrompt(prompt, t);
+            rows = stickyRows.Filter(rows, t);
             foreach (var row in stickyRows.NewlySticky)
                 Write($"sabit satır: {SubtitleLog.Excerpt(row)} görev/HUD yazısı sayıldı, çevrilmiyor");
         }

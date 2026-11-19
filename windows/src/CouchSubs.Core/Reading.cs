@@ -99,7 +99,7 @@ public sealed class Reading
         foreach (var line in Lines.OrderBy(line => line.Box!.Value.Left))
         {
             var box = line.Box!.Value;
-            var index = rows.FindIndex(row => SameRow(box, row.Box!.Value));
+            var index = rows.FindIndex(row => SameRow(box, row));
             if (index >= 0)
             {
                 var row = rows[index];
@@ -116,13 +116,18 @@ public sealed class Reading
 
     /// <summary><see cref="JoiningRows"/>: aynı satırdaki iki parça arasındaki en büyük boşluk (alan genişliğine oranla).</summary>
     public const double RowGap = 0.05;
+    /// <summary>Tuş ipucu fiili ("Hold") ile devamı arasında eksik/geniş tuş simgesi varsa kabul edilen yatay boşluk.</summary>
+    public const double IconRowGap = 0.22;
 
-    private static bool SameRow(TextBox next, TextBox row)
+    private static bool SameRow(TextBox next, TextLine row)
     {
-        var overlap = Math.Min(next.Bottom, row.Bottom) - Math.Max(next.Top, row.Top);
-        var smaller = Math.Min(next.Bottom - next.Top, row.Bottom - row.Top);
+        var box = row.Box!.Value;
+        var overlap = Math.Min(next.Bottom, box.Bottom) - Math.Max(next.Top, box.Top);
+        var smaller = Math.Min(next.Bottom - next.Top, box.Bottom - box.Top);
         if (smaller <= 0 || overlap < smaller * 0.6) return false;
-        return next.Left - row.Right <= RowGap;
+        var gap = next.Left - box.Right;
+        if (gap <= RowGap) return true;
+        return gap <= IconRowGap && ButtonPrompts.StartsWithPromptVerb(row.Text);
     }
 
     /// <summary>
@@ -269,15 +274,38 @@ public static class ButtonPrompts
     /// ("Hold to your course") konuşma sayılır (Mac: ButtonPrompts.isIconPrompt, Android: isIconPrompt, havuz:
     /// server/pool/src/prompts.js).
     /// </summary>
+    /// <summary>Satırın solu yalnızca ipucu fiili ve varsa tuş kalıntılarından ("Hold", "Hold 2 or R2") oluşuyorsa true.</summary>
+    internal static bool StartsWithPromptVerb(string text)
+    {
+        var tokens = text.Split(Separators, StringSplitOptions.RemoveEmptyEntries)
+            .Select(token => token.Trim(Brackets))
+            .Where(token => token.Length > 0)
+            .ToList();
+        return tokens.Count is >= 1 and <= 4 && Verbs.Contains(tokens[0]) && tokens.Skip(1).All(IsIconRemnant);
+    }
+
     private static bool IsIconPrompt(List<string> tokens, string line)
     {
         if (line.Any(c => "!?\"“”:".Contains(c))) return false;
         var all = tokens.SkipWhile(token => !token.Any(char.IsLetter)).ToList();
         if (all.Count < 3 || !Verbs.Contains(all[0])) return false;
         var to = all.FindIndex(1, token => token.Equals("to", StringComparison.OrdinalIgnoreCase));
-        if (to < 1 || to > 4 || !all.Skip(1).Take(to - 1).All(IsIconRemnant)) return false;
-        var next = all.Skip(to + 1).FirstOrDefault(token => token.Any(char.IsLetter));
-        return next is not null && all.Count - to - 1 <= 10 && !Objects.Contains(next);
+        if (to is >= 1 and <= 4 && all.Skip(1).Take(to - 1).All(IsIconRemnant))
+        {
+            var next = all.Skip(to + 1).FirstOrDefault(token => token.Any(char.IsLetter));
+            if (next is not null && all.Count - to - 1 <= 10 && !Objects.Contains(next)) return true;
+        }
+        // "Hold [L2] or [R2] and aim around until you locate a signal" kalıbı: fiil + simge kalıntıları + "and" + yönerge.
+        if (!SubtitleStabilizer.EndsSentence(line))
+        {
+            var and = all.FindIndex(1, token => token.Equals("and", StringComparison.OrdinalIgnoreCase));
+            if (and is >= 1 and <= 4 && all.Skip(1).Take(and - 1).All(IsIconRemnant))
+            {
+                var rest = all.Skip(and + 1).Count(token => token.Any(char.IsLetter));
+                if (rest is >= 3 and <= 12) return true;
+            }
+        }
+        return false;
     }
 
     /// <summary>
